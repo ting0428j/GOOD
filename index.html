@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>星光公主魔法拼圖 - 直式注音測驗 (雙重觸控友善版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@400;500;700&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Kiwi Maru', 'Noto Sans TC', sans-serif;
+            background: linear-gradient(135deg, #fdf4ff 0%, #fae8ff 40%, #f3e8ff 100%);
+            user-select: none;
+            -webkit-user-select: none;
+            min-height: 100vh;
+            touch-action: manipulation; /* 優化行動端點擊延遲 */
+        }
+        .bg-stars {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-image: radial-gradient(circle, #fbcfe8 1px, transparent 1px);
+            background-size: 50px 50px;
+            opacity: 0.3;
+            z-index: -1;
+        }
+        
+        @keyframes sparkle {
+            0%, 100% { transform: scale(1); filter: drop-shadow(0 0 5px #FFD700); }
+            50% { transform: scale(1.05); filter: drop-shadow(0 0 20px #FFD700) brightness(1.2); }
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            50% { transform: translateX(5px); }
+            75% { transform: translateX(-5px); }
+        }
+        @keyframes popIn {
+            0% { transform: scale(0); opacity: 0; }
+            80% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .sparkle-effect {
+            animation: sparkle 0.6s ease-in-out;
+        }
+        .error-shake {
+            animation: shake 0.3s ease-in-out;
+            border-color: #ef4444 !important;
+            background-color: #fef2f2 !important;
+        }
+
+        /* 目標畫框區域 - 改為橫式比例 (3/2) 並且放大兩倍 */
+        .puzzle-board {
+            aspect-ratio: 3 / 2;
+            width: 100%;
+            max-width: 640px; 
+            background-color: rgba(255, 255, 255, 0.4);
+            background-size: 100% 100%;
+            background-position: center;
+            background-repeat: no-repeat;
+            border: 8px solid #f472b6; /* 亮粉色夢幻畫框 */
+            border-radius: 20px;
+            box-shadow: inset 0 0 20px rgba(255,255,255,0.6), 0 10px 25px rgba(244, 114, 182, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .puzzle-board::before {
+            content: "✨ 魔法畫框 ✨";
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: #db2777;
+            font-size: 1.8rem;
+            font-weight: bold;
+            z-index: 2;
+            pointer-events: none;
+            text-align: center;
+            text-shadow: 0 0 10px #ffffff, 0 0 20px #fdf2f8;
+        }
+        /* 魔法畫框遮罩：極淡的白霧透氣色，避免顏色過深 */
+        .puzzle-board::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.45);
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* 畫框中的每一個格子 (Drop Target) */
+        .puzzle-slot {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.2);
+            z-index: 2;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .puzzle-slot.drag-over {
+            background-color: rgba(244, 114, 182, 0.6);
+            filter: drop-shadow(0 0 8px #f472b6);
+        }
+
+        /* 拼圖碎片 */
+        .puzzle-piece {
+            background-repeat: no-repeat;
+            cursor: grab;
+            transition: transform 0.1s, box-shadow 0.2s;
+            touch-action: none; /* 禁用瀏覽器預設觸控手勢，避免阻礙拖曳 */
+        }
+        .puzzle-piece:active {
+            cursor: grabbing;
+        }
+        /* 當拼圖在背包中時的樣式 - 配合放大後的比例微調寬度 */
+        .piece-in-inventory {
+            width: 120px;
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.25));
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        /* 當拼圖被點擊選取時的魔法光暈效果 */
+        .piece-selected {
+            outline: 4px solid #f59e0b;
+            outline-offset: 4px;
+            box-shadow: 0 0 15px #f59e0b;
+            transform: scale(1.1);
+            z-index: 10;
+        }
+        /* 當拼圖放置正確時的樣式 */
+        .piece-placed {
+            width: 100% !important;
+            height: 100% !important;
+            top: 0 !important;
+            left: 0 !important;
+            cursor: default;
+            pointer-events: none;
+            transform: none !important;
+            filter: none;
+            z-index: 3;
+            outline: none !important;
+            box-shadow: none !important;
+        }
+
+        /* 已獲得拼圖背包區 */
+        .inventory-area {
+            width: 100%;
+            min-height: 160px;
+            background: rgba(255, 255, 255, 0.7);
+            border: 3px dashed #fbcfe8;
+            border-radius: 16px;
+            padding: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 直式注音答題格子設計 */
+        .zhuyin-slot {
+            width: 55px;
+            height: 55px;
+            border: 3px dashed #cbd5e1;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.2rem;
+            font-weight: bold;
+            color: #64748b;
+            background: rgba(255, 255, 255, 0.7);
+            transition: all 0.2s;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .zhuyin-slot.active {
+            border-color: #d946ef;
+            border-style: solid;
+            background-color: rgba(253, 232, 255, 0.9);
+            box-shadow: 0 0 15px rgba(217, 70, 239, 0.4);
+            transform: scale(1.05);
+            color: #c026d3;
+        }
+        .zhuyin-slot.filled {
+            border-color: #10b981;
+            border-style: solid;
+            color: #10b981;
+            background: white;
+            box-shadow: 0 2px 5px rgba(16, 185, 129, 0.2);
+        }
+        
+        /* 答題區聲調排版 */
+        .zhuyin-container {
+            position: relative;
+            margin-right: 60px;
+            margin-top: 60px;
+        }
+        .tone-slot {
+            position: absolute;
+            right: -65px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 45px !important;
+            height: 45px !important;
+            font-size: 1.8rem !important;
+        }
+        .tone-slot.active {
+            transform: translateY(-50%) scale(1.1);
+        }
+        .tone-slot.neutral-tone {
+            right: 0;
+            top: -60px;
+            transform: none;
+        }
+        .tone-slot.neutral-tone.active {
+            transform: scale(1.1);
+        }
+
+        /* 自訂直式注音左右排版 (字在左，注音在右) */
+        .word-with-zhuyin {
+            display: inline-flex;
+            align-items: center;
+            margin-left: 10px; /* 拉大字和字的間距 */
+            margin-right: 10px;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            vertical-align: middle;
+        }
+        .zhuyin-ruby {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            margin-left: 6px;
+            height: 2.6rem;
+            min-width: 24px;
+        }
+
+        .example-img-loaded {
+            animation: fadeInImage 0.5s ease-out forwards;
+        }
+        @keyframes fadeInImage {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .font-biaukai {
+            font-family: 'BiauKai', 'DFKai-SB', 'Kaiti TC', '楷體-繁', '標楷體', serif;
+        }
+    </style>
+</head>
+<body class="text-gray-800 pb-10">
+    <div class="bg-stars"></div>
+
+    <div id="app" class="max-w-7xl mx-auto px-4 pt-6 relative z-10">
+        
+        <div id="menu-screen" class="flex flex-col items-center animate-fade-in">
+            <h1 class="text-4xl md:text-5xl font-black text-fuchsia-600 mb-3 text-center drop-shadow-md">
+                <i class="fa-solid fa-crown text-yellow-400"></i> 星光公主魔法拼圖
+            </h1>
+            <p class="text-lg text-fuchsia-500 mb-8 font-bold bg-white/60 px-6 py-2 rounded-full shadow-sm">
+                二下生字注音測驗 ✦ 答對獲得拼圖，親手拼出公主畫作！
+            </p>
+            
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 w-full max-w-4xl mb-6" id="menu-grid">
+                <!-- 動態生成 1-12 課按鈕 -->
+            </div>
+
+            <!-- 全冊大測驗按鈕 -->
+            <div class="w-full max-w-4xl px-2">
+                <button onclick="loadLesson('all')" class="w-full bg-gradient-to-r from-fuchsia-500 via-purple-500 to-pink-500 hover:from-fuchsia-600 hover:via-purple-600 hover:to-pink-600 text-white font-black py-5 px-6 rounded-2xl shadow-lg transform hover:-translate-y-1 transition-all text-2xl flex items-center justify-center gap-3 border-4 border-white">
+                    <i class="fa-solid fa-gem text-cyan-200 animate-pulse"></i> 全冊總複習大挑戰 <i class="fa-solid fa-gem text-cyan-200 animate-pulse"></i>
+                </button>
+            </div>
+        </div>
+
+        <div id="game-screen" class="hidden flex flex-col items-center">
+            
+            <!-- 頂部資訊列 -->
+            <div class="w-full max-w-6xl flex flex-wrap justify-between items-center mb-6 bg-white/80 p-3 md:p-4 rounded-3xl shadow-sm backdrop-blur-md border-2 border-fuchsia-100 gap-4">
+                <button onclick="backToMenu()" class="text-fuchsia-600 hover:text-fuchsia-800 font-bold px-4 py-2 rounded-full bg-fuchsia-100 hover:bg-fuchsia-200 transition flex items-center gap-2">
+                    <i class="fa-solid fa-arrow-left"></i> <span class="hidden md:inline">返回目錄</span>
+                </button>
+                <h2 id="lesson-title" class="text-xl md:text-2xl font-black text-fuchsia-700">第一課</h2>
+                <div class="flex gap-4">
+                    <div class="text-md font-bold text-white bg-gradient-to-r from-blue-400 to-indigo-400 px-4 py-2 rounded-full shadow-inner">
+                        答題：<span id="quiz-progress-text" class="text-yellow-200">0 / 10</span>
+                    </div>
+                    <div class="text-md font-bold text-white bg-gradient-to-r from-pink-400 to-purple-400 px-4 py-2 rounded-full shadow-inner">
+                        拼圖：<span id="puzzle-progress-text" class="text-yellow-200">0 / 10</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 主遊戲區：左右排版 (左側拼圖佔 7/12，右側答題佔 5/12，讓橫式大畫框展現得更完美) -->
+            <div class="flex flex-col lg:flex-row gap-8 w-full max-w-6xl items-start justify-center">
+                
+                <!-- 左側：公主魔法拼圖區域 (畫框 + 背包) -->
+                <div class="w-full lg:w-7/12 flex flex-col items-center gap-6">
+                    
+                    <!-- 目標畫框區 -->
+                    <div class="w-full flex flex-col items-center">
+                        <h3 class="text-fuchsia-600 font-bold mb-2 flex items-center gap-2">
+                            <i class="fa-regular fa-image"></i> 魔法畫框 (橫式大視窗)
+                        </h3>
+                        <p class="text-xs text-fuchsia-400 font-bold mb-2"><i class="fa-solid fa-wand-magic-sparkles animate-pulse"></i> 提示：可用「手指拖曳」拼圖，或「先點選拼圖再點選畫框格子」也能自動拼上喔！</p>
+                        <div id="puzzle-board" class="puzzle-board">
+                            <!-- 動態生成 10 個格子 (Drop Targets) -->
+                        </div>
+                    </div>
+
+                    <!-- 已獲得拼圖區 (背包) -->
+                    <div class="w-full flex flex-col items-center">
+                        <h3 class="text-blue-600 font-bold mb-2 flex items-center gap-2">
+                            <i class="fa-solid fa-box-open"></i> 獲得的拼圖碎片 (請拖曳到畫框)
+                        </h3>
+                        <div id="inventory-area" class="inventory-area">
+                            <span class="text-gray-400 text-sm" id="inventory-empty-msg">答對生字即可獲得拼圖喔！</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右側：直式注音測驗區域 -->
+                <div class="w-full lg:w-5/12 flex flex-col items-center bg-white/80 p-5 rounded-3xl shadow-xl backdrop-blur-md border-4 border-white relative">
+                    
+                    <button onclick="showHint()" class="absolute right-4 top-4 text-sm bg-yellow-100 text-yellow-700 px-4 py-2 rounded-full hover:bg-yellow-200 transition font-bold shadow-sm flex items-center gap-1 z-10">
+                        <i class="fa-solid fa-lightbulb"></i> 提示
+                    </button>
+                    
+                    <p class="text-fuchsia-500 font-black mb-4 text-md" id="quiz-instruction">請填寫這個生字的注音：</p>
+                    
+                    <!-- 測驗結束訊息 -->
+                    <div id="quiz-finished-msg" class="hidden w-full h-48 flex-col items-center justify-center bg-green-50 rounded-2xl border-2 border-green-200 mb-6">
+                        <i class="fa-solid fa-check-circle text-5xl text-green-400 mb-3"></i>
+                        <p class="text-xl font-bold text-green-600">測驗完成！</p>
+                        <p class="text-md text-green-500 mt-2">請將剩下的拼圖放入畫框中。</p>
+                    </div>
+
+                    <!-- 直式排版 (左國字、右注音直行) -->
+                    <div id="quiz-area" class="flex items-center justify-center gap-4 md:gap-8 bg-fuchsia-50/50 p-6 rounded-3xl border-2 border-fuchsia-100 mb-6 w-full relative">
+                        <!-- 左側大國字 -->
+                        <h1 id="target-word" class="text-[85px] md:text-[100px] font-biaukai font-black text-gray-800 drop-shadow-lg leading-none transition-colors duration-300">朵</h1>
+                        
+                        <!-- 右側直式注音格子 -->
+                        <div id="zhuyin-slots" class="flex flex-col gap-2 items-center justify-center min-w-[60px]">
+                            <!-- 動態生成直式注音格子 -->
+                        </div>
+                    </div>
+
+                    <!-- 例句與插圖 -->
+                    <div id="example-area" class="w-full bg-gradient-to-br from-white to-fuchsia-50 border-2 border-pink-200 rounded-2xl p-4 flex flex-col items-center gap-4 shadow-md">
+                        <!-- 插圖顯示區 -->
+                        <div class="w-24 h-24 shrink-0 rounded-2xl overflow-hidden border-4 border-white shadow-md bg-fuchsia-100 flex items-center justify-center relative">
+                            <i id="example-loading" class="fa-solid fa-spinner fa-spin text-fuchsia-300 text-xl absolute"></i>
+                            <img id="example-image" class="w-full h-full object-cover opacity-0 transition-opacity duration-300 relative z-10" src="" alt="魔法插圖" onload="this.classList.add('example-img-loaded'); this.style.opacity=1; document.getElementById('example-loading').style.display='none';">
+                        </div>
+                        
+                        <!-- 例句顯示區 -->
+                        <div class="w-full text-center">
+                            <div class="text-[11px] text-fuchsia-400 font-bold mb-2 tracking-widest"><i class="fa-solid fa-book-magic"></i> 魔法例句參考</div>
+                            <!-- 字與注音直式排版例句容器 -->
+                            <div id="example-sentence" class="text-gray-700 font-medium text-xl leading-loose tracking-wide flex flex-wrap items-center justify-center">
+                                載入例句中...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="completion-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-gradient-to-b from-white to-pink-50 rounded-[2rem] p-8 max-w-2xl w-full text-center shadow-2xl transform transition-all border-8 border-pink-300 relative overflow-hidden">
+                
+                <div class="absolute -top-10 -left-10 text-8xl opacity-20">✨</div>
+                <div class="absolute -bottom-10 -right-10 text-8xl opacity-20">👑</div>
+
+                <h2 class="text-3xl font-black text-fuchsia-600 mb-2 drop-shadow-sm">🎉 拼圖完成！ 🎉</h2>
+                <p id="feedback-text" class="text-md text-fuchsia-500 font-bold mb-6">太棒了！小公主成功親手修復了這幅專屬畫作！</p>
+                
+                <!-- 完整公主畫作展示 (橫式 3:2 比例) -->
+                <div class="flex justify-center w-full">
+                    <div id="unlocked-illustration" class="w-full max-w-[450px] aspect-[3/2] rounded-2xl mb-8 bg-[length:100%_100%] bg-center shadow-lg border-4 border-white"></div>
+                </div>
+                
+                <div class="flex flex-wrap justify-center gap-3">
+                    <button onclick="replayLesson()" class="bg-white text-fuchsia-500 border-2 border-fuchsia-200 hover:bg-fuchsia-50 font-bold py-3 px-6 rounded-full shadow transition text-md">
+                        <i class="fa-solid fa-rotate-right mr-1"></i> 再玩一次
+                    </button>
+                    <button id="btn-next-lesson" onclick="goToNextLesson()" class="bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-600 hover:via-purple-600 hover:to-pink-600 text-white font-bold py-3 px-8 rounded-full shadow-lg transition text-md border-2 border-white">
+                        前往下一課 <i class="fa-solid fa-arrow-right ml-1"></i>
+                    </button>
+                    <button onclick="backToMenu()" class="bg-gray-100 text-gray-500 hover:bg-gray-200 font-bold py-3 px-6 rounded-full shadow transition text-md">
+                        回目錄
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const allLessons = {
+            1: { title: "第一課 打招呼", words: {"朵":"ㄉㄨㄛˇ","柔":"ㄖㄡˊ","游":"ㄧㄡˊ","噴":"ㄆㄣ","美":"ㄇㄟˇ","麗":"ㄌㄧˋ","柱":"ㄓㄨˋ","試":"ㄕˋ","世":"ㄕˋ","界":"ㄐㄧㄝˋ","鹿":"ㄌㄨˋ","畫":"ㄏㄨㄚˋ","數":"ㄕㄨˋ","習":"ㄒㄧˊ"} },
+            2: { title: "第二課 爬梯子", words: {"梯":"ㄊㄧ","貼":"ㄊㄧㄝ","紙":"ㄓˇ","條":"ㄊㄧㄠˊ","線":"ㄒㄧㄢˋ","像":"ㄒㄧㄤˋ","迫":"ㄆㄛˋ","及":"ㄐㄧˊ","待":"ㄉㄞˋ","沿":"ㄧㄢˊ","頂":"ㄉㄧㄥˇ","巨":"ㄐㄩˋ","祝":"ㄓㄨˋ","福":"ㄈㄨˊ","身":"ㄕㄣ"} },
+            3: { title: "第三課 勇氣樹", words: {"勇":"ㄩㄥˇ","教":"ㄐㄧㄠˋ","室":"ㄕˋ","棵":"ㄎㄜ","葉":"ㄧㄝˋ","克":"ㄎㄜˋ","服":"ㄈㄨˊ","害":"ㄏㄞˋ","怕":"ㄆㄚˋ","跌":"ㄉㄧㄝˊ","倒":"ㄉㄠˇ","士":"ㄕˋ","足":"ㄗㄨˊ","完":"ㄨㄢˊ","成":"ㄔㄥˊ"} },
+            4: { title: "第四課 餅乾", words: {"掃":"ㄙㄠˇ","除":"ㄔㄨˊ","整":"ㄓㄥˇ","理":"ㄌㄧˇ","附":"ㄈㄨˋ","近":"ㄐㄧㄣˋ","香":"ㄒㄧㄤ","味":"ㄨㄟˋ","餅":"ㄅㄧㄥˇ","乾":"ㄍㄢ","拿":"ㄋㄚˊ","造":"ㄗㄠˋ","型":"ㄒㄧㄥˊ","圓":"ㄩㄢˊ","盤":"ㄆㄢˊ"} },
+            5: { title: "第五課 小書蟲", words: {"蟲":"ㄔㄨㄥˊ","動":"ㄉㄨㄥˋ","物":"ㄨˋ","喜":"ㄒㄧˇ","歡":"ㄏㄨㄢ","最":"ㄗㄨㄟˋ","高":"ㄍㄠ","奇":"ㄑㄧˊ","妙":"ㄇㄧㄠˋ","趣":"ㄑㄩˋ","猜":"ㄘㄞ","科":"ㄎㄜ","希":"ㄒㄧ","望":"ㄨㄤˋ","找":"ㄓㄠˇ"} },
+            6: { title: "第六課 從自己開始", words: {"灘":"ㄊㄢ","撿":"ㄐㄧㄢˇ","垃":"ㄌㄜˋ","圾":"ㄙㄜˋ","汗":"ㄏㄢˋ","塑":"ㄙㄨˋ","膠":"ㄐㄧㄠ","安":"ㄢ","全":"ㄑㄩㄢˊ","更":"ㄍㄥˋ","淨":"ㄐㄧㄥˋ","隨":"ㄙㄨㄟˊ","留":"ㄌㄧㄡˊ","便":"ㄅㄧㄢˋ","帶":"ㄉㄞˋ"} },
+            7: { title: "第七課 守株待兔", words: {"守":"ㄕㄡˇ","株":"ㄓㄨ","兔":"ㄊㄨˋ","農":"ㄋㄨㄥˊ","夫":"ㄈㄨ","田":"ㄊㄧㄢˊ","裡":"ㄌㄧˇ","忽":"ㄏㄨ","然":"ㄖㄢˊ","撞":"ㄓㄨㄤˋ","昏":"ㄏㄨㄣ","運":"ㄩㄣˋ","算":"ㄙㄨㄢˋ","辛":"ㄒㄧㄣ","苦":"ㄎㄨˇ"} },
+            8: { title: "第八課 角和腳", words: {"渴":"ㄎㄜˇ","影":"ㄧㄥˇ","瘦":"ㄕㄡˋ","不":"ㄅㄨˋ","滿":"ㄇㄢˇ","意":"ㄧˋ","漂":"ㄆㄧㄠˋ","亮":"ㄌㄧㄤˋ","嘆":"ㄊㄢˋ","遇":"ㄩˋ","狼":"ㄌㄤˊ","追":"ㄓㄨㄟ","傳":"ㄔㄨㄢˊ","丟":"ㄉㄧㄡ","命":"ㄇㄧㄥˋ"} },
+            9: { title: "第九課 赤腳國王", words: {"赤":"ㄔˋ","國":"ㄍㄨㄛˊ","熱":"ㄖㄜˋ","燙":"ㄊㄤˋ","宮":"ㄍㄨㄥ","涼":"ㄌㄧㄤˊ","痛":"ㄊㄨㄥˋ","令":"ㄌㄧㄥˋ","鋪":"ㄆㄨ","軟":"ㄖㄨㄢˇ","踩":"ㄘㄞˇ","破":"ㄆㄛˋ","毯":"ㄊㄢˇ","步":"ㄅㄨˋ","哭":"ㄎㄨ"} },
+            10: { title: "第十課 蜘蛛結網", words: {"珠":"ㄓㄨ","結":"ㄐㄧㄝˊ","網":"ㄨㄤˇ","捕":"ㄅㄨˇ","努":"ㄋㄨˇ","功":"ㄍㄨㄥ","敗":"ㄅㄞˋ","灰":"ㄏㄨㄟ","堅":"ㄐㄧㄢ","終":"ㄓㄨㄥ","於":"ㄩˊ","絲":"ㄙ","織":"ㄓ","抓":"ㄓㄨㄚ"} },
+            11: { title: "第十一課 夏夜飛舞", words: {"螢":"ㄧㄥˊ","火":"ㄏㄨㄛˇ","燈":"ㄉㄥ","夏":"ㄒㄧㄚˋ","夜":"ㄧㄝˋ","閃":"ㄕㄢˇ","爍":"ㄕㄨㄛˋ","舞":"ㄨˇ","叢":"ㄘㄨㄥˊ","尋":"ㄒㄩㄣˊ","星":"ㄒㄧㄥ","空":"ㄎㄨㄥ","飛":"ㄈㄟ"} },
+            12: { title: "第十二課 魔法仙子", words: {"願":"ㄩㄢˋ","實":"ㄕˊ","現":"ㄒㄧㄢˋ","魔":"ㄇㄛˊ","法":"ㄈㄚˇ","仙":"ㄒㄧㄢ","幫":"ㄅㄤ","善":"ㄕㄢˋ","良":"ㄌㄧㄤˊ","快":"ㄎㄨㄞˋ","永":"ㄩㄥˇ","永遠":"ㄩㄢˇ","裝":"ㄓㄨㄤ","寶":"ㄅㄠˇ"} }
+        };
+
+        const princessImages = {
+            1: "公主1.jpg", 2: "公主2.jpg", 3: "公主3.jpg", 4: "公主4.png", 5: "公主5.jpg",
+            6: "公主6.jpg", 7: "公主7.jpg", 8: "公主8.jpg", 9: "公主9.jpg", 10: "公主10.jpg",
+            11: "公主10.jpg", 12: "公主10.jpg", 'all': "公主10.jpg"
+        };
+
+        const sentencesDict = {
+            "朵": "白(ㄅㄞˊ) 雲(ㄩㄣˊ) 朵(ㄉㄨㄛˇ) 朵(ㄉㄨㄛˇ) ， 在(ㄗㄞˋ) 天(ㄊㄧㄢ) 空(ㄎㄨㄥ) 中(ㄓㄨㄥ) 飄(ㄆㄧㄠ) 。",
+            "柔": "海(ㄏㄞˇ) 風(ㄈㄥ) 柔(ㄖㄡˊ) 柔(ㄖㄡˊ) ， 吹(ㄔㄨㄟ) 在(ㄗㄞˋ) 臉(ㄌㄧㄢˇ) 上(ㄕㄤˋ) 好(ㄏㄠˇ) 舒(ㄕㄨ) 服(ㄈㄨˊ) 。",
+            "游": "我(ㄨㄛˇ) 跟(ㄍㄣ) 媽(ㄇㄚ) 媽(ㄇㄚ) 向(ㄒㄧㄤˋ) 前(ㄑㄧㄢˊ) 游(ㄧㄡˊ) 。",
+            "噴": "媽(ㄇㄚ) 媽(ㄇㄚ) 噴(ㄆㄣ) 出(ㄔㄨ) 美(ㄇㄟˇ) 麗(ㄌㄧˋ) 的(ㄉㄜ˙) 水(ㄕㄨㄟˇ) 柱(ㄓㄨˋ) 。",
+            "美": "媽(ㄇㄚ) 媽(ㄇㄚ) 噴(ㄆㄣ) 出(ㄔㄨ) 美(ㄇㄟˇ) 麗(ㄌㄧˋ) 的(ㄉㄜ˙) 水(ㄕㄨㄟˇ) 柱(ㄓㄨˋ) 。",
+            "麗": "媽(ㄇㄚ) 媽(ㄇㄚ) 噴(ㄆㄣ) 出(ㄔㄨ) 美(ㄇㄟˇ) 麗(ㄌㄧˋ) 的(ㄉㄜ˙) 水(ㄕㄨㄟˇ) 柱(ㄓㄨˋ) 。",
+            "柱": "哇(ㄨㄚ) ！ 水(ㄕㄨㄟˇ) 柱(ㄓㄨˋ) 高(ㄍㄠ) 又(ㄧㄡˋ) 高(ㄍㄠ) 。",
+            "試": "來(ㄌㄞˊ) ， 你(ㄋㄧˇ) 也(ㄧㄝˇ) 試(ㄕˋ) 一(ㄧ) 試(ㄕˋ) 。",
+            "世": "第(ㄉㄧˋ) 一(ㄧ) 次(ㄘˋ) 跟(ㄍㄣ) 世(ㄕˋ) 界(ㄐㄧㄝˋ) 打(ㄉㄚˇ) 招(ㄓㄠ) 呼(ㄏㄨ) 。",
+            "界": "第(ㄉㄧˋ) 一(ㄧ) 次(ㄘˋ) 跟(ㄍㄣ) 世(ㄕˋ) 界(ㄐㄧㄝˋ) 打(ㄉㄚˇ) 招(ㄓㄠ) 呼(ㄏㄨ) 。",
+            "鹿": "可(ㄎㄜˇ) 愛(ㄞˋ) 的(ㄉㄜ˙) 小(ㄒㄧㄠˇ) 鹿(ㄌㄨˋ) 在(ㄗㄞˋ) 森林(ㄙㄣ) 裡(ㄌㄧˇ) 。",
+            "畫": "這(ㄓㄜˋ) 是(ㄕˋ) 「 麗(ㄌㄧˋ) 」 的(ㄉㄜ˙) 筆(ㄅㄧˇ) 畫(ㄏㄨㄚˋ) 順(ㄕㄨㄣˋ) 序(ㄒㄩˋ) 。",
+            "數": "數(ㄕㄨˇ) 字(ㄗˋ) 為(ㄨㄟˊ) 總(ㄗㄨㄥˇ) 筆(ㄅㄧˇ) 畫(ㄏㄨㄚˋ) 數(ㄕㄨˋ) 。",
+            "習": "寫(ㄒㄧㄝˇ) 完(ㄨㄢˊ) 後(ㄏㄡˋ) 還(ㄏㄞˊ) 有(ㄧㄡˇ) 課(ㄎㄜˋ) 堂(ㄊㄤˊ) 練(ㄌㄧㄢˋ) 習(ㄒㄧˊ) 。",
+            "梯": "好(ㄏㄠˇ) 像(ㄒㄧㄤˋ) 長(ㄔㄤˊ) 長(ㄔㄤˊ) 的(ㄉㄜ˙) 梯(ㄊㄧ) 子(ㄗ˙) 。",
+            "貼": "房(ㄈㄤˊ) 門(ㄇㄣˊ) 上(ㄕㄤˋ) 貼(ㄊㄧㄝ) 了(ㄌㄜ˙) 一(ㄧ) 大(ㄉㄚˋ) 張(ㄓㄤ) 白(ㄅㄞˊ) 紙(ㄓˇ) 。",
+            "紙": "房(ㄈㄤˊ) 門(ㄇㄣˊ) 上(ㄕㄤˋ) 貼(ㄊㄧㄝ) 了(ㄌㄜ˙) 一(ㄧ) 大(ㄉㄚˋ) 張(ㄓㄤ) 白(ㄅㄞˊ) 紙(ㄓˇ) 。",
+            "條": "紙(ㄓˇ) 上(ㄕㄤˋ) 有(ㄧㄡˇ) 一(ㄧ) 條(ㄊㄧㄠˊ) 又(ㄧㄡˋ) 一(ㄧ) 條(ㄊㄧㄠˊ) 的(ㄉㄜ˙) 線(ㄒㄧㄢˋ) 。",
+            "線": "紙(ㄓˇ) 上(ㄕㄤˋ) 有(ㄧㄡˇ) 一(ㄧ) 條(ㄊㄧㄠˊ) 又(ㄧㄡˋ) 一(ㄧ) 條(ㄊㄧㄠˊ) 的(ㄉㄜ˙) 線(ㄒㄧㄢˋ) 。",
+            "像": "好(ㄏㄠˇ) 像(ㄒㄧㄤˋ) 長(ㄔㄤˊ) 長(ㄔㄤˊ) 的(ㄉㄜ˙) 梯(ㄊㄧ) 子(ㄗ˙) 。",
+            "迫": "我(ㄨㄛˇ) 迫(ㄆㄛˋ) 不(ㄅㄨˋ) 及(ㄐㄧˊ) 待(ㄉㄞˋ) 的(ㄉㄜ˙) 站(ㄓㄢˋ) 在(ㄗㄞˋ) 前(ㄑㄧㄢˊ) 面(ㄇㄧㄢˋ) 。",
+            "及": "我(ㄨㄛˇ) 迫(ㄆㄛˋ) 不(ㄅㄨˋ) 及(ㄐㄧˊ) 待(ㄉㄞˋ) 的(ㄉㄜ˙) 站(ㄓㄢˋ) 在(ㄗㄞˋ) 前(ㄑㄧㄢˊ) 面(ㄇㄧㄢˋ) 。",
+            "待": "我(ㄨㄛˇ) 迫(ㄆㄛˋ) 不(ㄅㄨˋ) 及(ㄐㄧˊ) 待(ㄉㄞˋ) 的(ㄉㄜ˙) 站(ㄓㄢˋ) 在(ㄗㄞˋ) 前(ㄑㄧㄢˊ) 面(ㄇㄧㄢˋ) 。",
+            "沿": "爸(ㄅㄚˋ) 爸(ㄅㄚˋ) 沿(ㄧㄢˊ) 著(ㄓㄜ˙) 我(ㄨㄛˇ) 的(ㄉㄜ˙) 頭(ㄊㄡˊ) 頂(ㄉㄧㄥˇ) 畫(ㄏㄨㄚˋ) 線(ㄒㄧㄢˋ) 。",
+            "頂": "爸(ㄅㄚˋ) 爸(ㄅㄚˋ) 沿(ㄧㄢˊ) 著(ㄓㄜ˙) 我(ㄨㄛˇ) 的(ㄉㄜ˙) 頭(ㄊㄡˊ) 頂(ㄉㄧㄥˇ) 畫(ㄏㄨㄚˋ) 線(ㄒㄧㄢˋ) 。",
+            "巨": "想(ㄒㄧㄤˇ) 像(ㄒㄧㄤˋ) 自(ㄗˋ) 己(ㄐㄧˇ) 是(ㄕˋ) 個(ㄍㄜ˙) 巨(ㄐㄩˋ) 人(ㄖㄣˊ) 。",
+            "祝": "開(ㄎㄞ) 心(ㄒㄧㄣ) 地(ㄉㄜ˙) 獻(ㄒㄧㄢˋ) 上(ㄕㄤˋ) 祝(ㄓㄨˋ) 福(ㄈㄨˊ) 。",
+            "福": "開(ㄎㄞ) 心(ㄒㄧㄣ) 地(ㄉㄜ˙) 獻(ㄒㄧㄢˋ) 上(ㄕㄤˋ) 祝(ㄓㄨˋ) 福(ㄈㄨˊ) 。",
+            "身": "這(ㄓㄜˋ) 是(ㄕˋ) 我(ㄨㄛˇ) 們(ㄇㄣˊ) 家(ㄐㄧㄚ) 人(ㄖㄣˊ) 的(ㄉㄜ˙) 身(ㄕㄣ) 高(ㄍㄠ) 線(ㄒㄧㄢˋ) 。",
+            "勇": "教(ㄐㄧㄠˋ) 室(ㄕˋ) 裡(ㄌㄧˇ) 有(ㄧㄡˇ) 一(ㄧ) 棵(ㄎㄜ) 勇(ㄩㄥˇ) 氣(ㄑㄧˋ) 樹(ㄕㄨˋ) 。",
+            "教": "教(ㄐㄧㄠˋ) 室(ㄕˋ) 裡(ㄌㄧˇ) 有(ㄧㄡˇ) 一(ㄧ) 棵(ㄎㄜ) 勇(ㄩㄥˇ) 氣(ㄑㄧˋ) 樹(ㄕㄨˋ) 。",
+            "室": "教(ㄐㄧㄠˋ) 室(ㄕˋ) 裡(ㄌㄧˇ) 有(ㄧㄡˇ) 一(ㄧ) 棵(ㄎㄜ) 勇(ㄩㄥˇ) 氣(ㄑㄧˋ) 樹(ㄕㄨˋ) 。",
+            "棵": "教(ㄐㄧㄠˋ) 室(ㄕˋ) 裡(ㄌㄧˇ) 有(ㄧㄡˇ) 一(ㄧ) 棵(ㄎㄜ) 勇(ㄩㄥˇ) 氣(ㄑㄧˋ) 樹(ㄕㄨˋ) 。",
+            "葉": "樹(ㄕㄨˋ) 上(ㄕㄤˋ) 貼(ㄊㄧㄝ) 滿(ㄇㄢˇ) 了(ㄌㄜ˙) 葉(ㄧㄝˋ) 子(ㄗ˙) 。",
+            "克": "大(ㄉㄚˋ) 家(ㄐㄧㄚ) 克(ㄎㄜˋ) 服(ㄈㄨˊ) 了(ㄌㄜ˙) 害(ㄏㄞˋ) 怕(ㄆㄚˋ) 。",
+            "服": "大(ㄉㄚˋ) 家(ㄐㄧㄚ) 克(ㄎㄜˋ) 服(ㄈㄨˊ) 了(ㄌㄜ˙) 害(ㄏㄞˋ) 怕(ㄆㄚˋ) 。",
+            "害": "大(ㄉㄚˋ) 家(ㄐㄧㄚ) 克(ㄎㄜˋ) 服(ㄈㄨˊ) 了(ㄌㄜ˙) 害(ㄏㄞˋ) 怕(ㄆㄚˋ) 。",
+            "怕": "我(ㄨㄛˇ) 不(ㄅㄨˋ) 怕(ㄆㄚˋ) 跌(ㄉㄧㄝˊ) 倒(ㄉㄠˇ) 。",
+            "跌": "我(ㄨㄛˇ) 不(ㄅㄨˋ) 怕(ㄆㄚˋ) 跌(ㄉㄧㄝˊ) 倒(ㄉㄠˇ) 。",
+            "倒": "我(ㄨㄛˇ) 不(ㄅㄨˋ) 怕(ㄆㄚˋ) 跌(ㄉㄧㄝˊ) 倒(ㄉㄠˇ) 。",
+            "士": "戰(ㄓㄢˋ) 士(ㄕˋ) 挺(ㄊㄧㄥˇ) 起(ㄑㄧˇ) 胸(ㄒㄩㄥ) 膛(ㄊㄤˊ) 。",
+            "足": "游(ㄧㄡˊ) 戲(ㄒㄧˋ) 讓(ㄖㄤˋ) 我(ㄨㄛˇ) 們(ㄇㄣˊ) 滿(ㄇㄢˇ) 足(ㄗㄨˊ) 的(ㄉㄜ˙) 笑了(ㄒㄧㄠˋ) 。",
+            "完": "努(ㄋㄨˇ) 力(ㄌㄧˋ) 完(ㄨㄢˊ) 成(ㄔㄥˊ) 的(ㄉㄜ˙) 事(ㄕˋ) 情(ㄑㄧㄥˊ) 。",
+            "成": "努(ㄋㄨˇ) 力(ㄌㄧˋ) 完(ㄨㄢˊ) 成(ㄔㄥˊ) 的(ㄉㄜ˙) 事(ㄕˋ) 情(ㄑㄧㄥˊ) 。",
+            "掃": "起(ㄑㄧˇ) 床(ㄔㄨㄤˊ) 後(ㄏㄡˋ) 幫(ㄅㄤ) 忙(ㄇㄤˊ) 打(ㄉㄚˇ) 掃(ㄙㄠˇ) 房(ㄈㄤˊ) 間(ㄐㄧㄢ) 。",
+            "除": "除(ㄔㄨˊ) 草(ㄘㄠˇ) 的(ㄉㄜ˙) 工(ㄍㄨㄥ) 作(ㄗㄨㄛˋ) 剛(ㄍㄤ) 開(ㄎㄞ) 始(ㄕˇ) 。",
+            "整": "整(ㄓㄥˇ) 理(ㄌㄧˇ) 書(ㄕㄨ) 包(ㄅㄠ) 再(ㄗㄞˋ) 咬(ㄧㄠˇ) 一(ㄧ) 小(ㄒㄧㄠˇ) 口(ㄎㄡˇ) 。",
+            "理": "整(ㄓㄥˇ) 理(ㄌㄧˇ) 書(ㄕㄨ) 包(ㄅㄠ) 再(ㄗㄞˋ) 咬(ㄧㄠˇ) 一(ㄧ) 小(ㄒㄧㄠˇ) 口(ㄎㄡˇ) 。",
+            "附": "學(ㄒㄩㄝˊ) 校(ㄒㄧㄠˋ) 附(ㄈㄨˋ) 近(ㄐㄧㄣˋ) 的(ㄉㄜ˙) 樓(ㄌㄡˊ) 房(ㄈㄤˊ) 很(ㄏㄣˇ) 高(ㄍㄠ) 。",
+            "近": "學(ㄒㄩㄝˊ) 校(ㄒㄧㄠˋ) 附(ㄈㄨˋ) 近(ㄐㄧㄣˋ) 的(ㄉㄜ˙) 樓(ㄌㄡˊ) 房(ㄈㄤˊ) 很(ㄏㄣˇ) 高(ㄍㄠ) 。",
+            "香": "又(ㄧㄡˋ) 香(ㄒㄧㄤ) 又(ㄧㄡˋ) 甜(ㄊㄧㄢˊ) 的(ㄉㄜ˙) 大(ㄉㄚˋ) 餅(ㄅㄧㄥˇ) 。",
+            "味": "這(ㄓㄜˋ) 個(ㄍㄜ˙) 芝(ㄓ) 麻(ㄇㄚˊ) 餅(ㄅㄧㄥˇ) 有(ㄧㄡˇ) 好(ㄏㄠˇ) 滋(ㄗ) 味(ㄨㄟˋ) 。",
+            "餅": "像(ㄒㄧㄤˋ) 一(ㄧ) 塊(ㄎㄨㄞˋ) 圓(ㄩㄢˊ) 形(ㄒㄧㄥˊ) 的(ㄉㄜ˙) 大(ㄉㄚˋ) 芝(ㄓ) 麻(ㄇㄚˊ) 餅(ㄅㄧㄥˇ) 。",
+            "乾": "餅(ㄅㄧㄥˇ) 乾(ㄍㄢ) 碎(ㄙㄨㄟˋ) 屑(ㄒㄧㄝˋ) 掉(ㄉㄧㄠˋ) 在(ㄗㄞˋ) 桌(ㄓㄨㄛ) 上(ㄕㄤˋ) 。",
+            "拿": "我(ㄨㄛˇ) 們(ㄇㄣˊ) 拿(ㄋㄚˊ) 出(ㄔㄨ) 手(ㄕㄡˇ) 電(ㄉㄧㄢˋ) 筒(ㄊㄨㄥˇ) 照(ㄓㄠˋ) 明(ㄇㄧㄥˊ) 。",
+            "造": "每(ㄇㄟˇ) 個(ㄍㄜ˙) 人(ㄖㄣˊ) 都有(ㄉㄡ) 自(ㄗˋ) 己(ㄐㄧˇ) 的(ㄉㄜ˙) 創(ㄔㄨㄤˋ) 造(ㄗㄠˋ) 力(ㄌㄧˋ) 。",
+            "型": "像(ㄒㄧㄤˋ) 一(ㄧ) 塊(ㄎㄨㄞˋ) 圓(ㄩㄢˊ) 形(ㄒㄧㄥˊ) 的(ㄉㄜ˙) 大(ㄉㄚˋ) 芝(ㄓ) 麻(ㄇㄚˊ) 餅(ㄅㄧㄥˇ) 。",
+            "圓": "像(ㄒㄧㄤˋ) 一(ㄧ) 塊(ㄎㄨㄞˋ) 圓(ㄩㄢˊ) 形(ㄒㄧㄥˊ) 的(ㄉㄜ˙) 大(ㄉㄚˋ) 芝(ㄓ) 麻(ㄇㄚˊ) 餅(ㄅㄧㄥˇ) 。",
+            "盤": "盤(ㄆㄢˊ) 子(ㄗ˙) 上(ㄕㄤˋ) 只(ㄓˇ) 剩(ㄕㄥˋ) 一(ㄧ) 塊(ㄎㄨㄞˋ) 蛋(ㄉㄢˋ) 糕(ㄍㄠ) 了(ㄌㄜ˙) 。",
+            "蟲": "布(ㄅㄨˋ) 布(ㄅㄨˋ) 是(ㄕˋ) 喜(ㄒㄧˇ) 歡(ㄏㄨㄢ) 看(ㄎㄢˋ) 書(ㄕㄨ) 的(ㄉㄜ˙) 小(ㄒㄧㄠˇ) 書(ㄕㄨ) 蟲(ㄔㄨㄥˊ) 。",
+            "動": "森(ㄙㄣ) 林(ㄌㄧㄣˊ) 裡(ㄌㄧˇ) 有(ㄧㄡˇ) 許(ㄒㄩˇ) 多(ㄉㄨㄛ) 動(ㄉㄨㄥˋ) 物(ㄨˋ) 。",
+            "物": "森(ㄙㄣ) 林(ㄌㄧㄣˊ) 裡(ㄌㄧˇ) 有(ㄧㄡˇ) 許(ㄒㄩˇ) 多(ㄉㄨㄛ) 動(ㄉㄨㄥˋ) 物(ㄨˋ) 。",
+            "喜": "布(ㄅㄨˋ) 布(ㄅㄨˋ) 是(ㄕˋ) 喜(ㄒㄧˇ) 歡(ㄏㄨㄢ) 看(ㄎㄢˋ) 書(ㄕㄨ) 的(ㄉㄜ˙) 小(ㄒㄧㄠˇ) 書(ㄕㄨ) 蟲(ㄔㄨㄥˊ) 。",
+            "歡": "布(ㄅㄨˋ) 布(ㄅㄨˋ) 是(ㄕˋ) 喜(ㄒㄧˇ) 歡(ㄏㄨㄢ) 看(ㄎㄢˋ) 書(ㄕㄨ) 的(ㄉㄜ˙) 小(ㄒㄧˇ) 書(ㄕㄨ) 蟲(ㄔㄨㄥˊ) 。",
+            "最": "世(ㄕˋ) 界(ㄐㄧㄝˋ) 上(ㄕㄤˋ) 最(ㄗㄨㄟˋ) 高(ㄍㄠ) 的(ㄉㄜ˙) 動(ㄉㄨㄥˋ) 物(ㄨˋ) 是(ㄕˋ) 誰(ㄕㄟˊ) 呢(ㄋㄜ˙) ？",
+            "高": "世(ㄕˋ) 界(ㄐㄧㄝˋ) 上(ㄕㄤˋ) 最(ㄗㄨㄟˋ) 高(ㄍㄠ) 的(ㄉㄜ˙) 動(ㄉㄨㄥˋ) 物(ㄨˋ) 是(ㄕˋ) 誰(ㄕㄟˊ) 呢(ㄋㄜ˙) ？",
+            "奇": "森(ㄙㄣ) 林(ㄌㄧㄣˊ) 裡(ㄌㄧˇ) 的(ㄉㄜ˙) 好(ㄏㄠˇ) 奇(ㄑㄧˊ) 大(ㄉㄚˋ) 王(ㄨㄤˊ) 。",
+            "妙": "這(ㄓㄜˋ) 是一個(ㄧ) 奇(ㄑㄧˊ) 妙(ㄇㄧㄠˋ) 的(ㄉㄜ˙) 故(ㄍㄨˋ) 事(ㄕˋ) 。",
+            "趣": "原(ㄩˊ) 來(ㄌㄞˊ) 我(ㄨㄛˇ) 想(ㄒㄧˇ) 知(ㄓ) 道(ㄉㄠˋ) 的(ㄉㄜ˙) 都(ㄉㄡ) 在(ㄗㄞˋ) 書(ㄕㄨ) 裡(ㄌㄧˇ) ， 真(ㄓㄣ) 有(ㄧㄡˇ) 趣(ㄑㄩˋ) 。",
+            "猜": "大(ㄉㄚˋ) 家(ㄐㄧㄚ) 猜(ㄘㄞ) 猜(ㄘㄞ) 看(ㄎㄢˋ) 這(ㄓㄜˋ) 是(ㄕˋ) 什(ㄕㄣˊ) 麼(ㄇㄜ˙) 意(ㄧˋ) 思(ㄙ) 。",
+            "科": "布(ㄅㄨˋ) 布(ㄅㄨˋ) 喜(ㄒㄧˇ) 歡(ㄏㄨㄢ) 看(ㄎㄢˋ) 百(ㄅㄞˇ) 科(ㄎㄜ) 全(ㄑㄩㄢˊ) 書(ㄕㄨ) 。",
+            "希": "我(ㄨㄛˇ) 們(ㄇㄣˊ) 懷(ㄏㄨㄞˊ) 抱(ㄅㄠˋ) 著(ㄓㄜ˙) 希(ㄒㄧ) 望(ㄨㄤˋ) 學習(ㄒㄧˊ) 。",
+            "望": "不(ㄅㄨˋ) 管(ㄍㄨㄢˇ) 哪(ㄋㄚˇ) 一(ㄧ) 種(ㄓㄨㄥˇ) 書(ㄕㄨ) 都有(ㄉㄡ) 希(ㄒㄧ) 望(ㄨㄤˋ) 。",
+            "找": "書(ㄕㄨ) 裡(ㄌㄧˇ) 都(ㄉㄡ) 找(ㄓㄠˇ) 得(ㄉㄜ˙) 到(ㄉㄠˋ) 。",
+            "灘": "沙(ㄕㄚ) 灘(ㄊㄢ) 上(ㄕㄤˋ) ， 很(ㄏㄣˇ) 多(ㄉㄨㄛ) 人(ㄖㄣˊ) 努力(ㄋㄨˇ) 撿(ㄐㄧㄢˇ) 垃圾(ㄌㄜˋ) 。",
+            "撿": "沙(ㄕㄚ) 灘(ㄊㄢ) 上(ㄕㄤˋ) ， 很(ㄏㄣˇ) 多(ㄉㄨㄛ) 人(ㄖㄣˊ) 努力(ㄋㄨˇ) 撿(ㄐㄧㄢˇ) 垃圾(ㄌㄜˋ) 。",
+            "垃": "沙(ㄕㄚ) 灘(ㄊㄢ) 上(ㄕㄤˋ) ， 很(ㄏㄣˇ) ... 努力(ㄋㄨˇ) 撿(ㄐㄧㄢˇ) 垃(ㄌㄜˋ) 圾(ㄙㄜˋ) 。",
+            "圾": "沙(ㄕㄚ) 灘(ㄊㄢ) 上(ㄕㄤˋ) ， 很(ㄏㄣˇ) ... 努力(ㄋㄨˇ) 撿(ㄐㄧㄢˇ) 垃(ㄌㄜˋ) 圾(ㄙㄜˋ) 。",
+            "汗": "爸(ㄅㄚˋ) 爸(ㄅㄚˋ) 滿(ㄇㄢˇ) 頭(ㄊㄡˊ) 大(ㄉㄚˋ) 汗(ㄏㄢˋ) 的(ㄉㄜ˙) 撿(ㄐㄧㄢˇ) 垃圾(ㄌㄜˋ) 。",
+            "塑": "海(ㄏㄞˇ) 裡(ㄌㄧˇ) 的(ㄉㄜ˙) 動(ㄉㄨㄥˋ) 物(ㄨˋ) 最(ㄗㄨㄟˋ) 怕(ㄆㄚˋ) 塑(ㄙㄨˋ) 膠(ㄐㄧㄠ) 。",
+            "膠": "海(ㄏㄞˇ) 裡(ㄌㄧˇ) 的(ㄉㄜ˙) 動(ㄉㄨㄥˋ) 物(ㄨˋ) 最(ㄗㄨㄟˋ) 怕(ㄆㄚˋ) 塑(ㄙㄨˋ) 膠(ㄐㄧㄠ) 。",
+            "安": "為(ㄨㄟˋ) 了(ㄌㄜ˙) 給(ㄍㄟˇ) 牠(ㄊㄚ) 們(ㄇㄣˊ) 一(ㄧ) 個(ㄍㄜ˙) 安(ㄢ) 全(ㄑㄩㄢˊ) 的(ㄉㄜ˙) 家(ㄐㄧㄚ) 。",
+            "全": "為(ㄨㄟˋ) 了(ㄌㄜ˙) 給(ㄍㄟˇ) 牠(ㄊㄚ) 們(ㄇㄣˊ) 一(ㄧ) 個(ㄍㄜ˙) 安(ㄢ) 全(ㄑㄩㄢˊ) 的(ㄉㄜ˙) 家(ㄐㄧㄚ) 。",
+            "更": "一(ㄧ) 定(ㄉㄧㄥˋ) 會(ㄏㄨㄟˋ) 更(ㄍㄥˋ) 快(ㄎㄨㄞˋ) 樂(ㄌㄜˋ) 。",
+            "淨": "大(ㄉㄚˋ) 家(ㄐㄧㄚ) 在(ㄗㄞˋ) 淨(ㄐㄧㄥˋ) 灘(ㄊㄢ) 撿(ㄐㄧㄢˇ) 垃圾(ㄌㄜˋ) 。",
+            "隨": "隨(ㄙㄨㄟˊ) 身(ㄕㄣ) 地(ㄉㄧˋ) 毯(ㄊㄢˇ) 的(ㄉㄜ˙) 主(ㄓㄨˇ) 意(ㄧˋ) 。",
+            "留": "我(ㄨㄛˇ) 留(ㄌㄧㄡˊ) 了(ㄌㄜ˙) 一(ㄧ) 張(ㄓㄤ) 便(ㄅㄧㄢˋ) 條(ㄊㄧㄠˊ) 給(ㄍㄟˇ) 媽(ㄇㄚ) 媽(ㄇㄚ) 。",
+            "便": "我(ㄨㄛˇ) 留(ㄌㄧㄡˊ) 了(ㄌㄜ˙) 一(ㄧ) 張(ㄓㄤ) 便(ㄅㄧㄢˋ) 條(ㄊㄧㄠˊ) 給(ㄍㄟˇ) 媽(ㄇㄚ) 媽(ㄇㄚ) 。",
+            "帶": "啊(ㄚ) ！ 我(ㄨㄛˇ) 忘(ㄨㄤˋ) 記(ㄐㄧˋ) 帶(ㄉㄞˋ) 水(ㄕㄨㄟˇ) 壺(ㄏㄨˊ) 了(ㄌㄜ˙) 。",
+            "守": "天(ㄊㄧㄢ) 天(ㄊㄧㄢ) 守(ㄕㄡˇ) 著(ㄓㄜ˙) 幸(ㄒㄧㄥˋ) 運(ㄩㄣˋ) 樹(ㄕㄨˋ) 。",
+            "株": "守(ㄕㄡˇ) 株(ㄓㄨ) 待(ㄉㄞˋ) 兔(ㄊㄨˋ) 是(ㄕˋ) 個(ㄍㄜ˙) 成(ㄔㄥˊ) 語(ㄩˇ) 。",
+            "兔": "等(ㄉㄥˇ) 兔(ㄊㄨˋ) 子(ㄗ˙) 來(ㄌㄞˊ) 撞(ㄓㄨㄤˋ) 樹(ㄕㄨˋ) 。",
+            "農": "一(ㄧ) 個(ㄍㄜ˙) 農(ㄋㄨㄥˊ) 夫(ㄈㄨ) 種(ㄓㄨㄥˋ) 了(ㄌㄜ˙) 一(ㄧ) 塊(ㄎㄨㄞˋ) 田(ㄊㄧㄢˊ) 。",
+            "夫": "一(ㄧ) 個(ㄍㄜ˙) 農(ㄋㄨㄥˊ) 夫(ㄈㄨ) 種(ㄓㄨㄥˋ) 了(ㄌㄜ˙) 一(ㄧ) 塊(ㄎㄨㄞˋ) 田(ㄊㄧㄢˊ) 。",
+            "田": "一(ㄧ) 個(ㄍㄜ˙) 農(ㄋㄨㄥˊ) 夫(ㄈㄨ) 種(ㄓㄨㄥˋ) 了(ㄌㄜ˙) 一(ㄧ) 塊(ㄎㄨㄞˋ) 田(ㄊㄧㄢˊ) 。",
+            "裡": "一(ㄧ) 個(ㄍㄜ˙) 農(ㄋㄨㄥˊ) 夫(ㄈㄨ) 在(ㄗㄞˋ) 田(ㄊㄧㄢˊ) 裡(ㄌㄧˇ) 除草(ㄔㄨ) 。",
+            "忽": "忽(ㄏㄨ) 然(ㄖㄢˊ) ， 一(ㄧ) 隻(ㄓ) 兔(ㄊㄨˋ) 子(ㄗ˙) 忙(ㄇㄤˊ) 趕路(ㄍㄢˇ) 。",
+            "然": "忽(ㄏㄨ) 然(ㄖㄢˊ) ， 一(ㄧ) 隻(ㄓ) 兔(ㄊㄨˋ) 子(ㄗ˙) 忙(ㄇㄤˊ) 趕路(ㄍㄢˇ) 。",
+            "撞": "「 ㄆㄥ 」 的(ㄉㄜ˙) 一(ㄧ) 聲(ㄕㄥ) 撞(ㄓㄨㄤˋ) 上(ㄕㄤˋ) 樹(ㄕㄨˋ) 。",
+            "昏": "兔(ㄊㄨˋ) 子(ㄗ˙) 撞(ㄓㄨㄤˋ) 得(ㄉㄜ˙) 頭(ㄊㄡˊ) 昏(ㄏㄨㄣ) 腦(ㄋㄠˇ) 脹(ㄓㄤˋ) 。",
+            "運": "農(ㄋㄨㄥˊ) 夫(ㄈㄨ) 幸(ㄒㄧˋ) 運(ㄩㄣˋ) 得(ㄉㄜˊ) 到(ㄉㄠˋ) 一(ㄧ) 隻(ㄓ) 兔(ㄊㄨˋ) 。",
+            "算": "真(ㄓㄣ) 不(ㄅㄨˋ) 算(ㄙㄨㄢˋ) 是(ㄕˋ) 好(ㄏㄠˇ) 運(ㄩㄣˋ) 氣(ㄑㄧˋ) 。",
+            "辛": "農(ㄋㄨㄥˊ) 夫(ㄈㄨ) 辛(ㄒㄧㄣ) 苦(ㄎㄨˇ) 地(ㄉㄜ˙) 工作(ㄗㄨㄛˋ) 。",
+            "苦": "農(ㄋㄨㄥˊ) 夫(ㄈㄨ) 辛(ㄒㄧㄣ) 苦(ㄎㄨˇ) 地(ㄉㄜ˙) 工作(ㄗㄨㄛˋ) 。",
+            "渴": "有(ㄧㄡˇ) 一(ㄧ) 隻(ㄓ) 口(ㄎㄡˇ) 渴(ㄎㄜˇ) 的(ㄉㄜ˙) 花(ㄏㄨㄚ) 鹿(ㄌㄨˋ) 到(ㄉㄠˋ) 河(ㄏㄜˊ) 邊(ㄅㄧㄢ) 喝(ㄏㄜ) 水(ㄕㄨㄟˇ) 。",
+            "影": "看(ㄎㄢˋ) 見(ㄐㄧㄢˋ) 自(ㄗˋ) 己(ㄐㄧˇ) 在(ㄗㄞˋ) 水(ㄕㄨㄟˇ) 中(ㄓㄨㄥ) 的(ㄉㄜ˙) 倒(ㄉㄠˋ) 影(ㄧㄥˇ) 。",
+            "瘦": "對(ㄉㄨㄟˋ) 四(ㄙˋ) 隻(ㄓ) 又(ㄧㄡˋ) 瘦(ㄕㄡˋ) 又(ㄧㄡˋ) 長(ㄔㄤˊ) 的(ㄉㄜ˙) 腳(ㄐㄧㄠˇ) 很(ㄏㄣˇ) 不(ㄅㄨˋ) 滿(ㄇㄢˇ) 意(ㄧˋ) 。",
+            "不": "對(ㄉㄨㄟˋ) 四(ㄙˋ) 隻(ㄓ) 又(ㄧㄡˋ) 瘦(ㄕㄡˋ) 又(ㄧㄡˋ) 長(ㄔㄤˊ) 的(ㄉㄜ˙) 腳(ㄐㄧㄠˇ) 很(ㄏㄣˇ) 不(ㄅㄨˋ) 滿(ㄇㄢˇ) 意(ㄧˋ) 。",
+            "滿": "對(ㄉㄨㄟˋ) 四(ㄙˋ) 隻(ㄓ) 又(ㄧㄡˋ) 瘦(ㄕㄡˋ) 又(ㄧㄡˋ) 長(ㄔㄤˊ) 的(ㄉㄜ˙) 腳(ㄐㄧㄠˇ) 很(ㄏㄣˇ) 不(ㄅㄨˋ) 滿(ㄇㄢˇ) 意(ㄧˋ) 。",
+            "意": "對(ㄉㄨㄟˋ) 四(ㄙˋ) 隻(ㄓ) 又(ㄧㄡˋ) 瘦(ㄕㄡˋ) 又(ㄧㄡˋ) 長(ㄔㄤˊ) 的(ㄉㄜ˙) 腳(ㄐㄧㄠˇ) 很(ㄏㄣˇ) 不(ㄅㄨˋ) 滿(ㄇㄢˇ) 意(ㄧˋ) 。",
+            "漂": "喜(ㄒㄧˇ) 歡(ㄏㄨㄢ) 頭(ㄊㄡˊ) 上(ㄕㄤˋ) 長(ㄓㄤˇ) 得(ㄉㄜ˙) 又(ㄧㄡˋ) 大(ㄉㄚˋ) 又(ㄧㄡˋ) 漂(ㄆㄧㄠˋ) 亮(ㄌㄧㄤˋ) 的(ㄉㄜ˙) 角(ㄐㄧㄠˇ) 。",
+            "亮": "喜(ㄒㄧˇ) 歡(ㄏㄨㄢ) 頭(ㄊㄡˊ) 上(ㄕㄤˇ) 長(ㄓㄤˇ) 得(ㄉㄜ˙) 又(ㄧㄡˋ) 大(ㄉㄚˋ) 又(ㄧㄡˋ) 漂(ㄆㄧㄠˋ) 亮(ㄌㄧㄤˋ) 的(ㄉㄜ˙) 角(ㄐㄧㄠˇ) 。",
+            "嘆": "花(ㄏㄨㄚ) 鹿(ㄌㄨˋ) 嘆(ㄊㄢˋ) 了(ㄌㄜ˙) 一(ㄧ) 口(ㄎㄡˇ) 氣(ㄑㄧˋ) 。",
+            "遇": "外(ㄨㄞˋ) 出(ㄔㄨ) 時(ㄕˊ) 遇(ㄩˋ) 到(ㄉㄠˋ) 很多(ㄏㄣˇ) 朋友(ㄆㄥˊ) 。",
+            "狼": "大(ㄉㄚˋ) 灰(ㄏㄨㄟ) 狼(ㄌㄤˊ) 張(ㄓㄠ) 開(ㄎㄞ) 大(ㄉㄚˋ) 嘴(ㄗㄨㄟˇ) 。",
+            "追": "一(ㄧ) 隻(ㄓ) 獅(ㄕ) 子(ㄗ˙) 追(ㄓㄨㄟ) 了(ㄌㄜ˙) 過(ㄍㄨㄛˋ) 來(ㄌㄞˊ) 。",
+            "傳": "林(ㄌㄧㄣˊ) 中(ㄓㄨㄥ) 傳(ㄔㄨㄢˊ) 來(ㄌㄞˊ) 可(ㄎㄜˇ) 怕(ㄆㄚˋ) 的(ㄉㄜ˙) 吼(ㄏㄡˇ) 聲(ㄕㄥ) 。",
+            "丟": "別(ㄅㄧㄝˊ) 把(ㄅㄚˇ) 垃圾(ㄌㄜˋ) 亂(ㄌㄨㄢˋ) 丟(ㄉㄧㄡ) 喔(ㄛ) 。",
+            "命": "牙(ㄧㄚˊ) 仙(ㄒㄧㄢ) 子(ㄗ˙) 的(ㄉㄜ˙) 任(ㄖㄣˋ) 務(ㄨˋ) 命(ㄇㄧㄥˋ) 令(ㄌㄧㄥˋ) 。",
+            "赤": "赤(ㄔˋ) 腳(ㄐㄧㄠˇ) 國(ㄍㄨㄛˊ) 裡(ㄌㄧˇ) ， 人(ㄖㄣˊ) 人(ㄖㄣˊ) 都(ㄉㄡ) 打(ㄉㄚˇ) 赤(ㄔˋ) 腳(ㄐㄧㄠˇ) 。",
+            "國": "赤(ㄔˋ) 腳(ㄐㄧˇ) 國(ㄍㄨㄛˊ) 裡(ㄌㄧˇ) ， 人(ㄖㄣˊ) 人(ㄖㄣˊ) 都(ㄉㄡ) 打(ㄉㄚˇ) 赤(ㄔˋ) 腳(ㄐㄧˇ) 。",
+            "熱": "地(ㄉㄧˋ) 面(ㄇㄧㄢˋ) 又(ㄧㄡˋ) 熱(ㄖㄜˋ) 又(ㄧㄡˋ) 燙(ㄊㄤˋ) 。",
+            "燙": "地(ㄉㄧˋ) 面(ㄇㄧㄢˋ) 又(ㄧㄡˋ) 熱(ㄖㄜˋ) 又(ㄧㄡˋ) 燙(ㄊㄤˋ) 。",
+            "宮": "赤(ㄔˋ) 腳(ㄐㄧㄠˇ) 國(ㄍㄨㄛˊ) 王(ㄨㄤˊ) 住(ㄓㄨˋ) 在(ㄗㄞˋ) 王(ㄨㄤˊ) 宮(ㄍㄨㄥ) 裡(ㄌㄧˇ) 。",
+            "涼": "夏(ㄒㄧㄚˋ) 天(ㄊㄧㄢ) 涼(ㄌㄧㄤˊ) 快(ㄎㄨㄞˋ) ， 冬(ㄉㄨㄥ) 天(ㄊㄧㄢ) 溫(ㄨㄣ) 暖(ㄋㄨㄢˇ) 。",
+            "痛": "踩(ㄘㄞˇ) 到(ㄉㄠˋ) 泥(ㄋㄧˊ) 土地(ㄊㄨ) 腳(ㄐㄧˇ) 好(ㄏㄠˇ) 痛(ㄊㄨㄥˋ) 。",
+            "令": "國(ㄍㄨㄛˊ) 王(ㄨㄤˊ) 下(ㄒㄧㄚˋ) 令(ㄌㄧㄥˋ) 鋪(ㄆㄨ) 地(ㄉㄧˋ) 毯(ㄊㄢˇ) 。",
+            "鋪": "國(ㄍㄨㄛˊ) 王(ㄨㄤˊ) 下(ㄒㄧㄚˋ) 令(ㄌㄧㄥˋ) 鋪(ㄆㄨ) 地(ㄉㄧˋ) 毯(ㄊㄢˇ) 。",
+            "軟": "地(ㄉㄧˋ) 毯(ㄊㄢˇ) 又(ㄧㄡˋ) 軟(ㄖㄨㄢˇ) 又(ㄧㄡˋ) 舒(ㄕㄨ) 服(ㄈㄨˊ) 。",
+            "踩": "小(ㄒㄧㄠˇ) 朋(ㄆㄥˊ) 友(ㄧㄡˇ) 玩(ㄨˊ) 踩(ㄘㄞˇ) 高(ㄍㄠ) 蹺(ㄑㄧㄠ) 。",
+            "破": "衣服(ㄧ) 磨(ㄇㄛˊ) 破(ㄆㄛˋ) 了一個(ㄧ) 洞(ㄉㄨㄥˋ) 。",
+            "毯": "國(ㄍㄨㄛˊ) 王(ㄨㄤˊ) 腳(ㄐㄧˇ) 踩(ㄘㄞˇ) 在(ㄗㄞˋ) 地(ㄉㄧˋ) 毯(ㄊㄢˇ) 上(ㄕㄤˋ) 。",
+            "步": "到(ㄉㄠˋ) 公(ㄍㄨㄥ) 園(ㄩㄢˊ) 散(ㄙㄢˋ) 步(ㄅㄨˋ) 。",
+            "哭": "小(ㄒㄧㄠˇ) 孩(ㄏㄞˊ) 大(ㄉㄚˋ) 哭(ㄎㄨ) 了(ㄌㄜ˙) 起來(ㄑㄧˇ) 。",
+            "珠": "一(ㄧ) 隻(ㄓ) 蜘(ㄓ) 蛛(ㄓㄨ) 在(ㄗㄞˋ) 織(ㄓ) 網(ㄨㄤˇ) 。",
+            "結": "蜘(ㄓ) 蛛(ㄓㄨ) 的(ㄉㄜ˙) 網(ㄨㄤˇ) 結(ㄐㄧㄝˊ) 得(ㄉㄜ˙) 很(ㄏㄣˇ) 大(ㄉㄚˋ) 。",
+            "網": "一(ㄧ) 隻(ㄓ) 蜘(ㄓ) 蛛(ㄓㄨ) 在(ㄗㄞˋ) 織(ㄓ) 網(ㄨㄤˇ) 。",
+            "捕": "蜘(ㄓ) 蛛(ㄓㄨ) 織(ㄓ) 網(ㄨㄤˇ) 是(ㄕˋ) 為了(ㄨㄟˋ) 捕(ㄅㄨˇ) 蟲(ㄔㄨㄥˊ) 。",
+            "努": "大(ㄉㄚˋ) 家(ㄐㄧㄚ) 努(ㄋㄨˇ) 力(ㄌㄧˋ) 的(ㄉㄜ˙) 學習(ㄒㄧˊ) 。",
+            "功": "第(ㄉㄧˋ) 一(ㄧ) 次(ㄘˋ) 打(ㄉㄚˇ) 招(ㄓㄠ) 呼(ㄏㄨ) ， 成(ㄔㄥˊ) 功(ㄍㄨㄥ) ！",
+            "敗": "失(ㄕ) 敗(ㄅㄞˋ) 了(ㄌㄜ˙) 也(ㄧㄝˇ) 不要(ㄅㄨˊ) 灰(ㄏㄨㄟ) 心(ㄒㄧㄣ) 。",
+            "灰": "失(ㄕ) 敗(ㄅㄞˋ) 了(ㄌㄜ˙) 也(ㄧㄝˇ) 不要(ㄅㄨˊ) 灰(ㄏㄨㄟ) 心(ㄒㄧㄣ) 。",
+            "堅": "石(ㄕˊ) 頭(ㄊㄡˊ) 屋(ㄨ) 十(ㄕˊ) 分(ㄈㄣ) 堅(ㄐㄧㄢ) 固(ㄍㄨˋ) 。",
+            "終": "我(ㄨㄛˇ) 們(ㄇㄣˊ) 終(ㄓㄨㄥ) 於(ㄩˊ) 找到(ㄓㄠˇ) 了(ㄌㄜ˙) 答案(ㄉㄚˊ) 。",
+            "於": "於(ㄩˊ) 是(ㄕˋ) ， 國(ㄍㄨㄛˊ) 王(ㄨㄤˊ) 叫(ㄐㄧㄠˋ) 人(ㄖㄣˊ) 做了(ㄗㄨㄛˋ) 隨(ㄙㄨㄟˊ) 身(ㄕㄣ) 地(ㄉㄧˋ) 毯(ㄊㄢˇ) 。",
+            "絲": "蜘(ㄓ) 蛛(ㄓㄨ) 吐(ㄊㄨˇ) 出(ㄔㄨ) 細(ㄒㄧˋ) 絲(ㄙ) 。",
+            "織": "蜘(ㄓ) 蛛(ㄓㄨ) 吐(ㄊㄨˇ) 出(ㄔㄨ) 細(ㄒㄧˋ) 絲(ㄙ) 織(ㄓ) 網(ㄨㄤˇ) 。",
+            "抓": "老(ㄌㄠˇ) 鷹(ㄧㄥ) 用(ㄩㄥˋ) 爪(ㄓㄨㄚˇ) 子(ㄗ˙) 抓(ㄓㄨㄚ) 魚(ㄩˊ) 。",
+            "螢": "夏(ㄒㄧㄚˋ) 夜(ㄧㄝˋ) 裡(ㄌㄧˇ) 有(ㄧㄡˇ) 螢(ㄧㄥˊ) 火(ㄏㄨㄛˇ) 蟲(ㄔㄨㄥˊ) 飛舞(ㄈㄟ) 。",
+            "火": "螢(ㄧㄥˊ) 火(ㄏㄨㄛˇ) 蟲(ㄔㄨㄥˊ) 的(ㄉㄜ˙) 小(ㄒㄧㄠˇ) 燈(ㄉㄥ) 籠(ㄌㄨㄥˊ) 像(ㄒㄧㄚˋ) 火(ㄏㄨㄛˇ) 。",
+            "燈": "螢(ㄧㄥˊ) 火(ㄏㄨㄛˇ) 蟲(ㄔㄨㄥˊ) 的(ㄉㄜ˙) 小(ㄒㄧˇ) 燈(ㄉㄥ) 籠(ㄌㄨㄥˊ) 亮(ㄌㄧㄤˋ) 起來(ㄑㄧˇ) 。",
+            "夏": "夏(ㄒㄧㄚˋ) 天(ㄊㄧㄢ) 的(ㄉㄜ˙) 天(ㄊㄧㄢ) 氣(ㄑㄧˋ) 真(ㄓㄣ) 好(ㄏㄠˇ) 。",
+            "夜": "從(ㄘㄨㄥˊ) 白(ㄅㄞˊ) 天(ㄊㄧㄢ) 等(ㄉㄥˇ) 到(ㄉㄠˋ) 夜(ㄧㄝˋ) 晚(ㄨㄢˇ) 。",
+            "閃": "星星(ㄒㄧㄥ) 在(ㄗㄞˋ) 夜(ㄧㄝˋ) 空(ㄎㄨㄥ) 裡(ㄌㄧˇ) 閃(ㄕㄢˇ) 爍(ㄕㄨㄛˋ) 。",
+            "爍": "星星(ㄒㄧㄥ) 在(ㄗㄞˋ) 夜(ㄧㄝˋ) 空(ㄎㄨㄥ) 裡(ㄌㄧˇ) 閃(ㄕㄢˇ) 爍(ㄕㄨㄛˋ) 。",
+            "舞": "公(ㄍㄨㄥ) 主(ㄓㄨˇ) 在(ㄗㄞˋ) 草(ㄘㄠˇ) 原(ㄩㄢˊ) 上(ㄕㄤˋ) 跳(ㄊㄧㄠˋ) 舞(ㄨˇ) 。",
+            "叢": "草(ㄘㄠˇ) 叢(ㄘㄨㄥˊ) 裡(ㄌㄧˇ) 有(ㄧㄡˇ) 小(ㄒㄧㄠˇ) 蟲(ㄔㄨㄥˊ) 。",
+            "尋": "小(ㄒㄧㄠˇ) 羊(ㄧㄤˊ) 在(ㄗㄞˋ) 尋(ㄒㄩㄣˊ) 找(ㄓㄠˇ) 媽媽(ㄇㄚ) 。",
+            "星": "天(ㄊㄧㄢ) 上(ㄕㄤˋ) 的(ㄉㄜ˙) 星(ㄒㄧㄥ) 星(ㄒㄧㄥ) 亮(ㄌㄧㄤˋ) 晶(ㄐㄧㄥ) 晶(ㄐㄧㄥ) 。",
+            "空": "天(ㄊㄧㄢ) 空(ㄎㄨㄥ) 中(ㄓㄨㄥ) 出(ㄔㄨ) 現(ㄒㄧㄢˋ) 彩(ㄘㄞˇ) 虹(ㄏㄨㄥˊ) 。",
+            "飛": "小(ㄒㄧㄠˇ) 鳥(ㄋㄧㄠˇ) 在(ㄗㄞˋ) 天(ㄊㄧㄢ) 空(ㄎㄨㄥ) 飛(ㄈㄟ) 翔(ㄒㄧㄤˊ) 。",
+            "願": "我(ㄨㄛˇ) 許(ㄒㄩˇ) 下(ㄒㄧㄚˋ) 了(ㄌㄜ˙) 一(ㄧ) 個(ㄍㄜ˙) 願(ㄩㄢˋ) 望(ㄨㄤˋ) 。",
+            "實": "希(ㄒㄧ) 望(ㄨㄤˋ) 願(ㄩㄢˋ) 望(ㄨㄤˋ) 能(ㄋㄥˊ) 實(ㄕˊ) 現(ㄒㄧㄢˋ) 。",
+            "現": "希(ㄒㄧ) 望(ㄨㄤˋ) 願(ㄩㄢˋ) 望(ㄨㄤˋ) 能(ㄋㄥˊ) 實(ㄕˊ) 現(ㄒㄧㄢˋ) 。",
+            "魔": "仙(ㄒㄧㄢ) 子(ㄗ˙) 施(ㄕ) 展(ㄓㄢˇ) 了(ㄌㄜ˙) 魔(ㄇㄛˊ) 法(ㄈㄚˇ) 。",
+            "法": "仙(ㄒㄧㄢ) 子(ㄗ˙) 施(ㄕ) 展(ㄓㄢˇ) 了(ㄌㄜ˙) 魔(ㄇㄛˊ) 法(ㄈㄚˇ) 。",
+            "仙": "魔(ㄇㄛˊ) 法(ㄈㄚˇ) 仙(ㄒㄧㄢ) 子(ㄗ˙) 真(ㄓㄣ) 美(ㄇㄟˇ) 麗(ㄌㄧˋ) 。",
+            "幫": "請(ㄑㄧㄥˇ) 你(ㄋㄧˇ) 幫(ㄅㄤ) 我(ㄨㄛˇ) 一(ㄧ) 個(ㄍㄜ˙) 裝(ㄓㄨㄤ) 水(ㄕㄨㄟˇ) 。",
+            "善": "公(ㄍㄨㄥ) 主(ㄓㄨˇ) 有(ㄧㄡˇ) 一(ㄧ) 顆(ㄎㄜ) 善(ㄕㄢˋ) 良(ㄌㄧㄤˊ) 的(ㄉㄜ˙) 心(ㄒㄧㄣ) 。",
+            "良": "公(ㄍㄨㄥ) 主(ㄓㄨˇ) 有(ㄧㄡˇ) 一(ㄧ) 顆(ㄎㄜ) 善(ㄕㄢˋ) 良(ㄌㄧˊ) 的(ㄉㄜ˙) 心(ㄒㄧㄣ) 。",
+            "快": "一(ㄧ) 定(ㄉㄧㄥˋ) 會(ㄏㄨㄟˋ) 更(ㄍㄥˋ) 快(ㄎㄨㄞˋ) 樂(ㄌㄜˋ) 。",
+            "裝": "用(ㄩㄥˋ) 便(ㄅㄧㄢˋ) 當(ㄉㄤ) 盒(ㄏㄜˊ) 裝(ㄓㄨㄤ) 水(ㄕㄨㄟˇ) 果(ㄍㄨㄛˇ) 。",
+            "寶": "這(ㄓㄜˋ) 是(ㄕˋ) 我(ㄨㄛˇ) 們(ㄇㄣˊ) 最(ㄗㄨㄟˋ) 愛(ㄞˋ) 的(ㄉㄜ˙) 寶(ㄅㄠˇ) 貝(ㄅㄟˋ) 。"
+        };
+
+        const keyMap = {
+            '1':'ㄅ', 'q':'ㄆ', 'a':'ㄇ', 'z':'ㄈ', '2':'ㄉ', 'w':'ㄊ', 's':'ㄋ', 'x':'ㄌ', 'e':'ㄍ', 'd':'ㄎ', 'c':'ㄏ', 'r':'ㄐ', 'f':'ㄑ', 'v':'ㄒ',
+            '5':'ㄓ', 't':'ㄔ', 'g':'ㄕ', 'b':'ㄖ', 'y':'ㄗ', 'h':'ㄘ', 'n':'ㄙ', 'u':'ㄧ', 'j':'ㄨ', 'm':'ㄩ',
+            '8':'ㄚ', 'i':'ㄛ', 'k':'ㄜ', ',':'ㄝ', '9':'ㄞ', 'o':'ㄟ', 'l':'ㄠ', '.':'ㄡ', '0':'ㄢ', 'p':'ㄣ', ';':'ㄤ', '/':'ㄥ', '-':'ㄦ',
+            '6':'ˊ', '3':'ˇ', '4':'ˋ', '7':'˙', ' ':'ˉ', 'Space':'ˉ', 'Enter':'ˉ'
+        };
+
+        let state = {
+            currentLessonId: null,
+            testWords: [],
+            currentWordIndex: 0,
+            expectedSequence: [],
+            typedSequence: [],
+            quizCompleted: 0,
+            piecesPlaced: 0,
+            bgUrl: '',
+            availablePieces: [],
+            selectedPiece: null // 用於「點擊選取放置」機制的狀態暫存
+        };
+
+        const puzzlePiecesConfig = [];
+        
+        function generatePuzzleConfig() {
+            puzzlePiecesConfig.length = 0;
+            const cols = 5, rows = 2; // 橫式分佈 (5x2)
+            const boardW = 300, boardH = 200;
+            const cellW = boardW / cols;
+            const cellH = boardH / rows;
+            const tabSize = 14;
+
+            const hEdges = [];
+            for (let r = 0; r < rows - 1; r++) {
+                const row = [];
+                for (let c = 0; c < cols; c++) {
+                    row.push((r + c) % 2 === 0 ? 1 : -1);
+                }
+                hEdges.push(row);
+            }
+
+            const vEdges = [];
+            for (let r = 0; r < rows; r++) {
+                const row = [];
+                for (let c = 0; c < cols - 1; c++) {
+                    row.push((r + c) % 2 === 0 ? 1 : -1);
+                }
+                vEdges.push(row);
+            }
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const tLx = c * cellW, tLy = r * cellH;
+                    const tRx = (c + 1) * cellW, tRy = r * cellH;
+                    const bRx = (c + 1) * cellW, bRy = (r + 1) * cellH;
+                    const bLx = c * cellW, bLy = (r + 1) * cellH;
+
+                    const tabTop = (r === 0) ? 0 : -hEdges[r-1][c];
+                    const tabRight = (c === cols - 1) ? 0 : vEdges[r][c];
+                    const tabBottom = (r === rows - 1) ? 0 : hEdges[r][c];
+                    const tabLeft = (c === 0) ? 0 : -vEdges[r][c-1];
+
+                    let minX = tLx, maxX = tRx, minY = tLy, maxY = bRy;
+                    
+                    if (tabTop === -1) minY -= tabSize;
+                    if (tabBottom === -1) maxY += tabSize;
+                    if (tabLeft === -1) minX -= tabSize;
+                    if (tabRight === -1) maxX += tabSize;
+
+                    const pW = maxX - minX;
+                    const pH = maxY - minY;
+
+                    const pt = (gx, gy) => `${((gx - minX) / pW * 100).toFixed(2)}% ${((gy - minY) / pH * 100).toFixed(2)}%`;
+                    let polyPoints = [];
+
+                    function addEdge(x1, y1, x2, y2, tabDir) {
+                        if (tabDir === 0) {
+                            polyPoints.push(pt(x2, y2));
+                            return;
+                        }
+                        const dx = x2 - x1, dy = y2 - y1;
+                        const len = Math.sqrt(dx*dx + dy*dy);
+                        const nx = -dy / len, ny = dx / len;
+                        const ts = tabSize * tabDir;
+
+                        polyPoints.push(pt(x1 + dx*0.40, y1 + dy*0.40));
+                        polyPoints.push(pt(x1 + dx*0.33 + nx*ts, y1 + dy*0.33 + ny*ts));
+                        polyPoints.push(pt(x1 + dx*0.67 + nx*ts, y1 + dy*0.67 + ny*ts));
+                        polyPoints.push(pt(x1 + dx*0.60, y1 + dy*0.60));
+                        polyPoints.push(pt(x2, y2));
+                    }
+
+                    polyPoints.push(pt(tLx, tLy));
+                    addEdge(tLx, tLy, tRx, tRy, tabTop);
+                    addEdge(tRx, tRy, bRx, bRy, tabRight);
+                    addEdge(bRx, bRy, bLx, bLy, tabBottom);
+                    addEdge(bLx, bLy, tLx, tLy, tabLeft);
+
+                    puzzlePiecesConfig.push({
+                        index: r * cols + c,
+                        clipPath: `polygon(${polyPoints.join(', ')})`,
+                        left: `${(minX / boardW) * 100}%`,
+                        top: `${(minY / boardH) * 100}%`,
+                        width: `${(pW / boardW) * 100}%`,
+                        height: `${(pH / boardH) * 100}%`,
+                        bgSize: `${(boardW / pW) * 100}% ${(boardH / pH) * 100}%`,
+                        bgPosX: pW === boardW ? 0 : (minX / (boardW - pW)) * 100,
+                        bgPosY: pH === boardH ? 0 : (minY / (boardH - pH)) * 100,
+                        aspectRatio: `${pW} / ${pH}`
+                    });
+                }
+            }
+        }
+        generatePuzzleConfig();
+
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+        function initAudio() { if (!audioCtx) audioCtx = new AudioContext(); }
+        
+        function playSound(type) {
+            initAudio();
+            if (!audioCtx) return;
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            if (type === 'correct') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
+                gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                oscillator.start(); oscillator.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'wrong') {
+                oscillator.type = 'triangle';
+                oscillator.frequency.setValueAtTime(250, audioCtx.currentTime);
+                gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+                oscillator.start(); oscillator.stop(audioCtx.currentTime + 0.2);
+            } else if (type === 'pop') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(600, audioCtx.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.1);
+                gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                oscillator.start(); oscillator.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'place') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(400, audioCtx.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(1000, audioCtx.currentTime + 0.15);
+                gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+                oscillator.start(); oscillator.stop(audioCtx.currentTime + 0.15);
+            } else if (type === 'complete') {
+                [400, 500, 640, 800].forEach((freq, i) => {
+                    const osc = audioCtx.createOscillator();
+                    const gn = audioCtx.createGain();
+                    osc.connect(gn); gn.connect(audioCtx.destination);
+                    osc.frequency.value = freq;
+                    gn.gain.setValueAtTime(0.2, audioCtx.currentTime + i * 0.1);
+                    gn.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + i * 0.1 + 0.4);
+                    osc.start(audioCtx.currentTime + i * 0.1); osc.stop(audioCtx.currentTime + i * 0.1 + 0.4);
+                });
+            }
+        }
+
+        function initMenu() {
+            const menuContainer = document.getElementById('menu-grid');
+            menuContainer.innerHTML = '';
+            for (let i = 1; i <= 12; i++) {
+                const btn = document.createElement('button');
+                btn.className = "bg-white/80 hover:bg-white border-2 border-fuchsia-200 text-fuchsia-700 font-bold py-5 px-3 rounded-2xl shadow-sm hover:shadow-lg transition-all transform hover:-translate-y-1 text-lg flex flex-col items-center gap-2";
+                btn.innerHTML = `<span class="bg-fuchsia-100 text-fuchsia-500 rounded-full w-8 h-8 flex items-center justify-center text-sm mb-1">${i}</span> ${allLessons[i].title.replace(`第${['一','二','三','四','五','六','七','八','九','十','十一','十二'][i-1]}課 `,'')}`;
+                btn.onclick = () => loadLesson(i);
+                menuContainer.appendChild(btn);
+            }
+        }
+
+        function loadLesson(lessonId) {
+            initAudio();
+            state.currentLessonId = lessonId;
+            let allWordsList = [];
+
+            if (lessonId === 'all') {
+                for (let i = 1; i <= 12; i++) {
+                    Object.keys(allLessons[i].words).forEach(w => {
+                        allWordsList.push({ word: w, zhuyin: allLessons[i].words[w] });
+                    });
+                }
+                document.getElementById('lesson-title').innerHTML = '<i class="fa-solid fa-crown text-yellow-500"></i> 全冊總複習';
+            } else {
+                const lessonData = allLessons[lessonId];
+                Object.keys(lessonData.words).forEach(w => {
+                    allWordsList.push({ word: w, zhuyin: lessonData.words[w] });
+                });
+                document.getElementById('lesson-title').innerText = lessonData.title;
+            }
+            
+            allWordsList.sort(() => Math.random() - 0.5);
+            state.testWords = allWordsList.slice(0, 10);
+            
+            state.currentWordIndex = 0;
+            state.quizCompleted = 0;
+            state.piecesPlaced = 0;
+            state.selectedPiece = null;
+            
+            state.availablePieces = Array.from({length: 10}, (_, i) => i);
+            state.availablePieces.sort(() => Math.random() - 0.5);
+            
+            document.getElementById('menu-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+            
+            document.getElementById('quiz-area').classList.remove('hidden');
+            document.getElementById('example-area').classList.remove('hidden');
+            document.getElementById('quiz-instruction').classList.remove('hidden');
+            document.getElementById('quiz-finished-msg').classList.add('hidden');
+            document.getElementById('inventory-empty-msg').style.display = 'block';
+            document.getElementById('inventory-area').innerHTML = '<span class="text-gray-400 text-sm" id="inventory-empty-msg">答對生字即可獲得拼圖喔！</span>';
+
+            updateProgress();
+            setupPuzzleBoard(lessonId);
+            renderCurrentWord();
+        }
+
+        function setupPuzzleBoard(lessonId) {
+            const board = document.getElementById('puzzle-board');
+            state.bgUrl = princessImages[lessonId] || princessImages[1];
+            
+            board.innerHTML = `
+                <div id="board-loading" class="absolute inset-0 flex flex-col items-center justify-center z-20 bg-white/90 backdrop-blur-sm">
+                    <i class="fa-solid fa-wand-magic-sparkles animate-bounce text-4xl text-fuchsia-400 mb-3"></i>
+                    <span class="text-fuchsia-500 font-bold text-sm animate-pulse">繪製專屬公主畫作中...</span>
+                </div>
+            `;
+            board.style.backgroundImage = 'none';
+
+            const img = new Image();
+            img.onload = () => {
+                const loadingEl = document.getElementById('board-loading');
+                if (loadingEl) loadingEl.style.display = 'none';
+                board.style.backgroundImage = `url('${state.bgUrl}')`;
+            };
+            img.onerror = () => {
+                const loadingEl = document.getElementById('board-loading');
+                if (loadingEl) {
+                    loadingEl.innerHTML = `<div class="bg-white/90 p-3 rounded-xl shadow-lg border-2 border-red-300 text-center m-2 z-50">
+                        <p class="text-red-500 font-bold mb-1"><i class="fa-solid fa-triangle-exclamation"></i> 無法顯示：${state.bgUrl}</p>
+                        <p class="text-xs text-gray-600 mb-2 border-b pb-2">（線上預覽區無法讀取您的本機圖片）</p>
+                        <p class="text-sm text-fuchsia-600 font-bold leading-relaxed">👉 請點右上角「Export」下載網頁<br>與圖片放在「同一個資料夾」開啟<br><span class="text-xs text-gray-500">(記得確認圖片與副檔名是否相符喔)</span></p>
+                    </div>`;
+                }
+            };
+            img.src = state.bgUrl;
+            
+            for (let i = 0; i < 10; i++) {
+                const config = puzzlePiecesConfig[i];
+                const slot = document.createElement('div');
+                slot.className = 'puzzle-slot';
+                slot.dataset.index = i;
+                
+                slot.style.left = config.left;
+                slot.style.top = config.top;
+                slot.style.width = config.width;
+                slot.style.height = config.height;
+                slot.style.clipPath = config.clipPath;
+                
+                // HTML5 滑鼠拖曳事件
+                slot.addEventListener('dragover', (e) => {
+                    e.preventDefault(); 
+                    if (slot.children.length === 0) {
+                        slot.classList.add('drag-over');
+                    }
+                });
+                
+                slot.addEventListener('dragleave', () => {
+                    slot.classList.remove('drag-over');
+                });
+                
+                slot.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    slot.classList.remove('drag-over');
+                    
+                    const draggedPieceId = e.dataTransfer.getData('text/plain');
+                    const piece = document.getElementById(draggedPieceId);
+                    
+                    if (!piece) return;
+                    handlePieceDrop(piece, slot);
+                });
+
+                // 新增「點擊選取放置」觸碰/滑鼠共用機制
+                slot.addEventListener('click', () => {
+                    if (state.selectedPiece && slot.children.length === 0) {
+                        const success = handlePieceDrop(state.selectedPiece, slot);
+                        if (success) {
+                            // 消除選取框線
+                            state.selectedPiece.classList.remove('piece-selected');
+                            state.selectedPiece = null;
+                        } else {
+                            // 失敗抖動
+                            state.selectedPiece.classList.remove('error-shake');
+                            void state.selectedPiece.offsetWidth;
+                            state.selectedPiece.classList.add('error-shake');
+                            setTimeout(() => {
+                                if (state.selectedPiece) state.selectedPiece.classList.remove('error-shake');
+                            }, 500);
+                        }
+                    }
+                });
+                
+                board.appendChild(slot);
+            }
+            
+            document.getElementById('unlocked-illustration').style.backgroundImage = `url('${state.bgUrl}')`;
+        }
+
+        // 獨立出的拼圖判定邏輯
+        function handlePieceDrop(piece, slot) {
+            const pieceIndex = piece.dataset.index;
+            const slotIndex = slot.dataset.index;
+            
+            if (pieceIndex === slotIndex) {
+                playSound('place');
+                slot.appendChild(piece);
+                piece.classList.remove('piece-in-inventory', 'piece-selected');
+                piece.classList.add('piece-placed');
+                
+                piece.style.width = '';
+                piece.style.height = '';
+                piece.style.aspectRatio = '';
+                piece.style.position = '';
+                piece.style.left = '';
+                piece.style.top = '';
+                piece.style.zIndex = '';
+                
+                piece.setAttribute('draggable', 'false');
+                
+                state.piecesPlaced++;
+                updateProgress();
+                checkWinCondition();
+                return true;
+            } else {
+                playSound('wrong');
+                piece.classList.remove('error-shake');
+                void piece.offsetWidth;
+                piece.classList.add('error-shake');
+                return false;
+            }
+        }
+
+        function spawnPieceToInventory() {
+            const inventory = document.getElementById('inventory-area');
+            const emptyMsg = document.getElementById('inventory-empty-msg');
+            if (emptyMsg) emptyMsg.style.display = 'none';
+
+            if (state.availablePieces.length === 0) return;
+            
+            const pieceIndex = state.availablePieces.pop();
+            const config = puzzlePiecesConfig[pieceIndex];
+            
+            const piece = document.createElement('div');
+            const uniqueId = `piece-${pieceIndex}-${Date.now()}`;
+            piece.id = uniqueId;
+            piece.className = 'puzzle-piece piece-in-inventory';
+            piece.style.backgroundImage = `url('${state.bgUrl}')`;
+            piece.setAttribute('draggable', 'true');
+            piece.dataset.index = pieceIndex; 
+            
+            piece.style.clipPath = config.clipPath;
+            piece.style.backgroundSize = config.bgSize;
+            piece.style.backgroundPosition = `${config.bgPosX}% ${config.bgPosY}%`;
+            piece.style.aspectRatio = config.aspectRatio;
+            
+            // 1. 標準電腦端滑鼠 Drag 開始
+            piece.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', piece.id);
+                setTimeout(() => piece.style.opacity = '0.5', 0);
+                if (state.selectedPiece) {
+                    state.selectedPiece.classList.remove('piece-selected');
+                    state.selectedPiece = null;
+                }
+            });
+            
+            piece.addEventListener('dragend', () => {
+                piece.style.opacity = '1';
+            });
+
+            // 2. 小朋友觸控螢幕 Touch-Drag 邏輯（不依靠原生 HTML5 Drag）
+            setupTouchDrag(piece, inventory);
+
+            // 3. 點擊選取（輔助點選法）
+            piece.addEventListener('click', (e) => {
+                e.stopPropagation(); // 阻止氣泡傳播
+                if (piece.classList.contains('piece-placed')) return;
+
+                if (state.selectedPiece === piece) {
+                    // 取消選取
+                    piece.classList.remove('piece-selected');
+                    state.selectedPiece = null;
+                } else {
+                    // 清除前一個選取的
+                    if (state.selectedPiece) {
+                        state.selectedPiece.classList.remove('piece-selected');
+                    }
+                    // 設定目前選取
+                    state.selectedPiece = piece;
+                    piece.classList.add('piece-selected');
+                    playSound('pop');
+                }
+            });
+            
+            inventory.appendChild(piece);
+            playSound('pop');
+        }
+
+        // 針對觸控螢幕進行客製化的 Drag 事件模擬
+        function setupTouchDrag(piece, inventory) {
+            let startX, startY, origX, origY;
+            let isDragging = false;
+            let currentSlotHovered = null;
+
+            piece.addEventListener('touchstart', (e) => {
+                if (piece.classList.contains('piece-placed')) return;
+                isDragging = true;
+                
+                // 清理可能已經有的點選狀態
+                if (state.selectedPiece) {
+                    state.selectedPiece.classList.remove('piece-selected');
+                    state.selectedPiece = null;
+                }
+
+                const touch = e.touches[0];
+                const rect = piece.getBoundingClientRect();
+                
+                startX = touch.clientX;
+                startY = touch.clientY;
+                origX = rect.left;
+                origY = rect.top;
+                
+                // 固定實體大小，避免浮動時形狀變形
+                piece.style.width = rect.width + 'px';
+                piece.style.height = rect.height + 'px';
+                piece.style.position = 'fixed';
+                piece.style.left = origX + 'px';
+                piece.style.top = origY + 'px';
+                piece.style.zIndex = '999';
+                piece.style.transform = 'scale(1.1)'; // 微放大，讓小朋友的手指看得到底下
+                
+                e.preventDefault(); // 阻擋螢幕捲動
+            }, { passive: false });
+
+            piece.addEventListener('touchmove', (e) => {
+                if (!isDragging) return;
+                const touch = e.touches[0];
+                const dx = touch.clientX - startX;
+                const dy = touch.clientY - startY;
+                
+                piece.style.left = (origX + dx) + 'px';
+                piece.style.top = (origY + dy) + 'px';
+                
+                // 碰撞檢查：檢查目前手指下方是什麼格子
+                piece.style.visibility = 'hidden'; // 暫時隱藏，好讓 elementFromPoint 穿透
+                const elemBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+                piece.style.visibility = 'visible';
+                
+                // 清空之前的格子高亮
+                document.querySelectorAll('.puzzle-slot').forEach(s => s.classList.remove('drag-over'));
+                currentSlotHovered = null;
+
+                if (elemBelow) {
+                    const slot = elemBelow.closest('.puzzle-slot');
+                    if (slot && slot.children.length === 0) {
+                        slot.classList.add('drag-over');
+                        currentSlotHovered = slot;
+                    }
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            piece.addEventListener('touchend', (e) => {
+                if (!isDragging) return;
+                isDragging = false;
+                piece.style.transform = '';
+                
+                // 清理所有高亮格子
+                document.querySelectorAll('.puzzle-slot').forEach(s => s.classList.remove('drag-over'));
+
+                let placedSuccessfully = false;
+                if (currentSlotHovered) {
+                    placedSuccessfully = handlePieceDrop(piece, currentSlotHovered);
+                }
+
+                if (!placedSuccessfully) {
+                    // 放錯了，彈回背包
+                    playSound('wrong');
+                    piece.classList.add('error-shake');
+                    
+                    // 利用平滑移動動畫回彈
+                    piece.style.transition = 'all 0.3s ease-out';
+                    piece.style.left = origX + 'px';
+                    piece.style.top = origY + 'px';
+                    
+                    setTimeout(() => {
+                        piece.style.transition = '';
+                        piece.style.position = '';
+                        piece.style.left = '';
+                        piece.style.top = '';
+                        piece.style.width = '';
+                        piece.style.height = '';
+                        piece.style.zIndex = '';
+                        piece.style.aspectRatio = puzzlePiecesConfig[piece.dataset.index].aspectRatio;
+                        piece.classList.remove('error-shake');
+                        
+                        // 重新放回背包內
+                        inventory.appendChild(piece);
+                    }, 300);
+                }
+            });
+        }
+
+        function updateProgress() {
+            document.getElementById('quiz-progress-text').innerText = `${state.quizCompleted} / 10`;
+            document.getElementById('puzzle-progress-text').innerText = `${state.piecesPlaced} / 10`;
+        }
+
+        function getExpectedSequence(zhuyinStr) {
+            let seq = zhuyinStr.split('');
+            const tones = ['ˊ', 'ˇ', 'ˋ', '˙'];
+            if (!tones.some(t => zhuyinStr.includes(t))) {
+                seq.push('ˉ');
+            }
+            return seq;
+        }
+
+        function parseAndRenderSentence(sentence, targetWord) {
+            const container = document.getElementById('example-sentence');
+            container.innerHTML = ''; 
+            
+            const regex = /([^\s()（）]+)\(([^)]+)\)|([^\s()（）]+)/g;
+            let match;
+
+            while ((match = regex.exec(sentence)) !== null) {
+                if (match[1] && match[2]) {
+                    const char = match[1];
+                    const zhuyinStr = match[2];
+
+                    if (char === targetWord) {
+                        const targetWordSpan = document.createElement('span');
+                        targetWordSpan.className = "text-fuchsia-600 font-biaukai font-black text-3xl mx-2 bg-white rounded-2xl px-3 py-1 border-2 border-fuchsia-300 shadow-md inline-flex items-center align-middle transform -translate-y-1 transition-all animate-pulse";
+                        targetWordSpan.innerText = char;
+                        container.appendChild(targetWordSpan);
+                    } else {
+                        const wordDiv = document.createElement('div');
+                        wordDiv.className = "word-with-zhuyin";
+
+                        const charSpan = document.createElement('span');
+                        charSpan.className = "font-biaukai text-2xl text-gray-800 leading-none align-middle";
+                        charSpan.innerText = char;
+                        wordDiv.appendChild(charSpan);
+
+                        const rubyDiv = document.createElement('div');
+                        rubyDiv.className = "zhuyin-ruby";
+
+                        let mainSymbols = "";
+                        let toneSymbol = "";
+                        let isLightTone = false;
+
+                        if (zhuyinStr.startsWith('˙')) {
+                            isLightTone = true;
+                        }
+
+                        const tones = ['ˊ', 'ˇ', 'ˋ', '˙'];
+                        for (let c of zhuyinStr) {
+                            if (tones.includes(c)) {
+                                toneSymbol = c;
+                            } else if (c !== 'ˉ') {
+                                mainSymbols += c;
+                            }
+                        }
+
+                        if (isLightTone) {
+                            const lightDot = document.createElement('span');
+                            lightDot.className = "absolute text-[0.65rem] font-bold text-fuchsia-500 top-[-8px] left-[6px]";
+                            lightDot.innerText = '˙';
+                            rubyDiv.appendChild(lightDot);
+                        }
+
+                        const symbolSpan = document.createElement('span');
+                        symbolSpan.className = "text-[0.85rem] font-bold text-gray-500 leading-none tracking-tighter select-none";
+                        symbolSpan.style.writingMode = "vertical-rl";
+                        symbolSpan.innerText = mainSymbols;
+                        rubyDiv.appendChild(symbolSpan);
+
+                        if (!isLightTone && toneSymbol) {
+                            const toneSpan = document.createElement('span');
+                            toneSpan.className = "absolute text-[0.8rem] font-bold text-fuchsia-500 right-[-10px] top-[25%]";
+                            toneSpan.innerText = toneSymbol;
+                            rubyDiv.appendChild(toneSpan);
+                        }
+
+                        wordDiv.appendChild(rubyDiv);
+                        container.appendChild(wordDiv);
+                    }
+                } else if (match[3]) {
+                    const rawText = match[3];
+                    const rawSpan = document.createElement('span');
+                    rawSpan.className = "font-biaukai text-2xl text-gray-400 mx-1 leading-none align-middle select-none";
+                    rawSpan.innerText = rawText;
+                    container.appendChild(rawSpan);
+                }
+            }
+        }
+
+        function renderCurrentWord() {
+            if (state.currentWordIndex >= 10) {
+                document.getElementById('quiz-area').classList.add('hidden');
+                document.getElementById('example-area').classList.add('hidden');
+                document.getElementById('quiz-instruction').classList.add('hidden');
+                document.getElementById('quiz-finished-msg').classList.remove('hidden');
+                document.getElementById('quiz-finished-msg').style.display = 'flex';
+                return;
+            }
+
+            const currentObj = state.testWords[state.currentWordIndex];
+            
+            const wordEl = document.getElementById('target-word');
+            wordEl.innerText = currentObj.word;
+            wordEl.classList.remove('text-green-500', 'sparkle-effect'); 
+            
+            let sentence = sentencesDict[currentObj.word];
+            if (!sentence) {
+                sentence = `我(ㄨㄛˇ) 們(ㄇㄣˊ) 喜(ㄒㄧˇ) 歡(ㄏㄨㄢ) 寫(ㄒㄧㄝˇ) ${currentObj.word}(${currentObj.zhuyin}) 字(ㄗˋ) 。`;
+            }
+            
+            parseAndRenderSentence(sentence, currentObj.word);
+            
+            const imgEl = document.getElementById('example-image');
+            imgEl.style.opacity = '0';
+            imgEl.classList.remove('example-img-loaded');
+            document.getElementById('example-loading').style.display = 'block';
+            
+            const seed = currentObj.word.charCodeAt(0) * 123; 
+            const imgPrompt = encodeURIComponent(`cute anime illustration of magical item for kids learning, pastel color, simple background`);
+            imgEl.src = `https://image.pollinations.ai/prompt/${imgPrompt}?width=200&height=200&nologo=true&seed=${seed}`;
+            
+            state.expectedSequence = getExpectedSequence(currentObj.zhuyin);
+            state.typedSequence = [];
+            
+            renderZhuyinSlots();
+        }
+
+        function renderZhuyinSlots() {
+            const container = document.getElementById('zhuyin-slots');
+            container.innerHTML = '';
+            
+            const wrapper = document.createElement('div');
+            wrapper.className = 'zhuyin-container flex flex-col gap-2 items-center justify-center';
+            
+            for (let i = 0; i < state.expectedSequence.length; i++) {
+                const slot = document.createElement('div');
+                slot.className = 'zhuyin-slot';
+                
+                if (i < state.typedSequence.length) {
+                    slot.innerText = state.typedSequence[i];
+                    slot.classList.add('filled');
+                } else if (i === state.typedSequence.length) {
+                    slot.classList.add('active');
+                }
+                
+                const char = state.expectedSequence[i];
+                const isTone = ['ˊ', 'ˇ', 'ˋ', '˙', 'ˉ'].includes(char);
+                if (isTone) {
+                    slot.classList.add('tone-slot');
+                    if (char === '˙') {
+                        slot.classList.add('neutral-tone');
+                    }
+                }
+                
+                wrapper.appendChild(slot);
+            }
+            container.appendChild(wrapper);
+        }
+
+        function showHint() {
+            const slots = document.getElementById('zhuyin-slots').querySelectorAll('.zhuyin-slot');
+            for (let i = state.typedSequence.length; i < state.expectedSequence.length; i++) {
+                slots[i].innerText = state.expectedSequence[i];
+                slots[i].style.color = '#cbd5e1';
+            }
+        }
+
+        function handleInput(char) {
+            if (state.currentWordIndex >= 10) return;
+            
+            const expectedChar = state.expectedSequence[state.typedSequence.length];
+            
+            if (char === expectedChar) {
+                state.typedSequence.push(char);
+                playSound('correct');
+                renderZhuyinSlots();
+                
+                if (state.typedSequence.length === state.expectedSequence.length) {
+                    wordCompleted();
+                }
+            } else {
+                playSound('wrong');
+                const activeSlot = document.querySelector('.zhuyin-slot.active');
+                if(activeSlot) {
+                    activeSlot.classList.remove('error-shake');
+                    void activeSlot.offsetWidth;
+                    activeSlot.classList.add('error-shake');
+                }
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (document.getElementById('game-screen').classList.contains('hidden') || 
+                !document.getElementById('completion-modal').classList.contains('hidden')) {
+                return;
+            }
+            
+            let inputChar = e.key;
+            if (e.code === 'Space' || e.key === ' ') {
+                inputChar = 'ˉ';
+                e.preventDefault();
+            }
+            
+            if (keyMap[inputChar.toLowerCase()]) {
+                inputChar = keyMap[inputChar.toLowerCase()];
+            }
+            
+            const validZhuyin = "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦˊˇˋ˙ˉ";
+            if (validZhuyin.includes(inputChar)) {
+                handleInput(inputChar);
+            }
+        });
+
+        function wordCompleted() {
+            document.getElementById('target-word').classList.add('text-green-500', 'sparkle-effect');
+            
+            state.quizCompleted++;
+            updateProgress();
+            
+            setTimeout(spawnPieceToInventory, 300);
+
+            state.currentWordIndex++;
+            setTimeout(renderCurrentWord, 1000); 
+        }
+
+        function checkWinCondition() {
+            if (state.piecesPlaced === 10) {
+                setTimeout(showCompletionModal, 500);
+            }
+        }
+
+        function showCompletionModal() {
+            playSound('complete');
+            document.getElementById('completion-modal').classList.remove('hidden');
+            
+            const btnNext = document.getElementById('btn-next-lesson');
+            if (state.currentLessonId === 'all') {
+                btnNext.classList.add('hidden');
+                document.getElementById('feedback-text').innerText = "太神啦！你完成了全冊大挑戰！你是最強魔法師！";
+            } else if (state.currentLessonId < 12) {
+                btnNext.classList.remove('hidden');
+                document.getElementById('feedback-text').innerText = "太棒了！小公主成功親手修復了這幅專屬畫作！";
+            } else {
+                btnNext.classList.add('hidden');
+                document.getElementById('feedback-text').innerText = "恭喜！12 幅皇家魔法畫作全數修復！";
+            }
+        }
+
+        function backToMenu() {
+            document.getElementById('completion-modal').classList.add('hidden');
+            document.getElementById('game-screen').classList.add('hidden');
+            document.getElementById('menu-screen').classList.remove('hidden');
+        }
+
+        function replayLesson() {
+            document.getElementById('completion-modal').classList.add('hidden');
+            loadLesson(state.currentLessonId);
+        }
+
+        function goToNextLesson() {
+            document.getElementById('completion-modal').classList.add('hidden');
+            if (state.currentLessonId !== 'all' && state.currentLessonId < 12) {
+                loadLesson(state.currentLessonId + 1);
+            }
+        }
+
+        initMenu();
+    </script>
+</body>
+</html>
